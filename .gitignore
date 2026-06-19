@@ -1,0 +1,58 @@
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+
+# ── Environment ──────────────────────────────────────────────
+.env
+*.env.local
+
+# ── Project meta-docs (internal, not for public repo) ────────
+AGENTS.md
+SKILLS.md
+DESIGN.md
+
+# ── Sensitive / Biometric data ───────────────────────────────
+data/faces/*
+data/embeddings/*
+!data/faces/.gitkeep
+!data/embeddings/.gitkeep
+
+# ── Firebase credentials ─────────────────────────────────────
+config/firebase-credentials.json
+config/*.json
+
+# ── AI Models (large binaries) ───────────────────────────────
+engine/models/*.pt
+engine/models/*.onnx
+!engine/models/.gitkeep
+
+# ── YOLOv8 auto-downloaded weights (lands in project root) ───
+*.pt
+*.onnx
+
+# ── Logs ─────────────────────────────────────────────────────
+data/logs/*
+!data/logs/.gitkeep
+*.log
+
+# ── IDE ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+.antigravity/
+*.swp
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Build ────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
