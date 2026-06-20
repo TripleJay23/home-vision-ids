@@ -1,10 +1,10 @@
+from pathlib import Path
 from ultralytics import YOLO
 from loguru import logger
 import numpy as np
 
 from config.settings import settings
 
-# Classes we care about (COCO dataset indices)
 TARGET_CLASSES = {
     0: "person",
     15: "cat",
@@ -14,13 +14,12 @@ TARGET_CLASSES = {
     28: "suitcase",
 }
 
+# Custom ByteTrack config — tuned track_buffer for re-entry stability.
+# See config/tracker/bytetrack_custom.yaml for reasoning.
+TRACKER_CONFIG = Path(__file__).resolve().parent.parent.parent / "config" / "tracker" / "bytetrack_custom.yaml"
+logger.info(f"Tracker config path: {TRACKER_CONFIG} | exists: {TRACKER_CONFIG.exists()}")
 
 class ObjectDetector:
-    """
-    Wraps YOLOv8n for real-time object detection.
-    Only processes classes defined in TARGET_CLASSES.
-    """
-
     def __init__(self):
         model_path = settings.models_path / settings.yolo_model
         logger.info(f"Loading YOLO model from: {model_path}")
@@ -29,26 +28,35 @@ class ObjectDetector:
         logger.success("YOLO model loaded.")
 
     def detect(self, frame: np.ndarray) -> list[dict]:
+        # unchanged — see previous version
+        ...
+
+    def track(self, frame: np.ndarray) -> list[dict]:
         """
-        Run detection on a single frame.
-        Returns list of detections: [{class, label, confidence, bbox}]
+        Run detection + ByteTrack tracking on a single frame, using the
+        tuned tracker config (extended track_buffer).
         """
-        results = self.model(
+        results = self.model.track(
             frame,
             conf=self.confidence,
             classes=list(TARGET_CLASSES.keys()),
+            persist=True,
+            tracker=str(TRACKER_CONFIG),
             verbose=False,
         )
 
         detections = []
         for result in results:
-            for box in result.boxes:
+            has_ids = result.boxes.id is not None
+            for i, box in enumerate(result.boxes):
                 class_id = int(box.cls[0])
+                track_id = int(result.boxes.id[i]) if has_ids else None
                 detections.append({
                     "class_id": class_id,
                     "label": TARGET_CLASSES.get(class_id, "unknown"),
                     "confidence": float(box.conf[0]),
-                    "bbox": box.xyxy[0].tolist(),  # [x1, y1, x2, y2]
+                    "bbox": box.xyxy[0].tolist(),
+                    "track_id": track_id,
                 })
 
         return detections
