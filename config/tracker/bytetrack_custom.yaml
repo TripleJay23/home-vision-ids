@@ -1,0 +1,20 @@
+# Tuned ByteTrack config for Home Vision IDS — Phase 1c
+# Based on Ultralytics default bytetrack.yaml, with track_buffer extended
+# to handle re-entry after stepping out of a CPU-constrained 14-16 FPS stream.
+#
+# Default track_buffer (30 frames) ≈ 2s at our FPS — too short for someone
+# walking out of frame and back in a few seconds later. Raised to 90 frames
+# (≈6s at ~15 FPS) so the tracker holds the "lost" track longer before
+# giving up and assigning a fresh ID on re-entry.
+#
+# NOTE: this does NOT fix ID swaps during person-crossing occlusion —
+# that's an IOU-matching limitation, not a buffer-length issue. Handled
+# separately via periodic re-verification in track_state.py (Phase 1c-4).
+
+tracker_type: bytetrack    # tracker type, ['botsort', 'bytetrack']
+track_high_thresh: 0.25    # threshold for the first association
+track_low_thresh: 0.1      # threshold for the second association
+new_track_thresh: 0.25     # threshold for init new track if detection doesn't match any tracks
+track_buffer: 90           # buffer to calculate when to remove lost tracks (~6s @ ~15 FPS)
+match_thresh: 0.8          # threshold for matching tracks
+fuse_score: True           # whether to fuse confidence scores with IOU distances before matching
