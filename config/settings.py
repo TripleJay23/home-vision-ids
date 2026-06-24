@@ -6,8 +6,8 @@ from pathlib import Path
 class Settings(BaseSettings):
     # Camera
     camera_url: str = Field(..., env="CAMERA_URL")
-    stream_width: int = Field(640, env="STREAM_WIDTH")
-    stream_height: int = Field(480, env="STREAM_HEIGHT")
+    stream_width: int = Field(1280, env="STREAM_WIDTH")
+    stream_height: int = Field(720, env="STREAM_HEIGHT")
     stream_fps: int = Field(15, env="STREAM_FPS")
 
     # AI Engine
