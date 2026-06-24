@@ -33,6 +33,15 @@ LIVE_DETECTOR_BACKEND = "yunet"
 # = more similar; below this counts as a match.
 MATCH_THRESHOLD = 0.52
 
+# Minimum gap (in cosine distance) required between the best-matching person
+# and the closest OTHER enrolled person before we trust the match. A query can
+# sit comfortably below MATCH_THRESHOLD yet be almost equidistant between two
+# enrolled people — at that point "nearest neighbour wins" is a coin flip and
+# the dominant cause of confidently-wrong matches (joshua labelled as noela and
+# vice versa). When the margin is this small we return "uncertain" rather than
+# committing to a name, and the caller retries on a later frame.
+MIN_CONFIDENCE_MARGIN = 0.08
+
 
 class FaceRecognizer:
     """Matches a face crop against the local known-faces database."""
@@ -55,7 +64,13 @@ class FaceRecognizer:
             {"status": "no_face",        "name": None, "distance": None}
             {"status": "no_known_faces", "name": None, "distance": None}
             {"status": "recognized",     "name": str,  "distance": float}
+            {"status": "uncertain",      "name": str,  "distance": float, "margin": float}
             {"status": "unrecognized",   "name": None, "distance": float}
+
+        "uncertain" means the closest match was below MATCH_THRESHOLD but too
+        close to a second enrolled person to trust (margin < MIN_CONFIDENCE_MARGIN).
+        Callers should treat it like "no_face" — retry on a later frame, do NOT
+        commit the name — rather than as a confirmed identity.
         """
         try:
             results = DeepFace.represent(
@@ -75,17 +90,32 @@ class FaceRecognizer:
         if self.db.embeddings.size == 0:
             return {"status": "no_known_faces", "name": None, "distance": None}
 
-        name, distance = self._best_match(query_embedding)
+        name, distance, margin = self._best_match(query_embedding)
 
-        if distance < MATCH_THRESHOLD:
-            logger.info(f"Recognized: {name} (distance: {distance:.3f})")
-            return {"status": "recognized", "name": name, "distance": distance}
+        if distance >= MATCH_THRESHOLD:
+            logger.info(f"Unrecognized face (closest distance: {distance:.3f}, threshold: {MATCH_THRESHOLD})")
+            return {"status": "unrecognized", "name": None, "distance": distance}
 
-        logger.info(f"Unrecognized face (closest distance: {distance:.3f}, threshold: {MATCH_THRESHOLD})")
-        return {"status": "unrecognized", "name": None, "distance": distance}
+        # Below threshold, but is the runner-up (a different person) too close?
+        if margin < MIN_CONFIDENCE_MARGIN:
+            logger.info(
+                f"Uncertain match: closest is '{name}' (distance: {distance:.3f}) but margin to next "
+                f"person is only {margin:.3f} < {MIN_CONFIDENCE_MARGIN} — not committing."
+            )
+            return {"status": "uncertain", "name": name, "distance": distance, "margin": margin}
 
-    def _best_match(self, query_embedding: np.ndarray) -> tuple[str, float]:
-        """Find the closest stored embedding by cosine distance. Returns (name, distance)."""
+        logger.info(f"Recognized: {name} (distance: {distance:.3f}, margin: {margin:.3f})")
+        return {"status": "recognized", "name": name, "distance": distance}
+
+    def _best_match(self, query_embedding: np.ndarray) -> tuple[str, float, float]:
+        """
+        Find the closest stored embedding by cosine distance.
+
+        Returns (best_name, best_distance, margin) where margin is the gap
+        between best_distance and the closest embedding belonging to a
+        DIFFERENT person. With only one enrolled person there is no other
+        person to confuse them with, so margin is +inf (never uncertain).
+        """
         db_embeddings = self.db.embeddings
         query_norm = query_embedding / np.linalg.norm(query_embedding)
         db_norms = db_embeddings / np.linalg.norm(db_embeddings, axis=1, keepdims=True)
@@ -97,4 +127,11 @@ class FaceRecognizer:
         best_name = self.db.metadata[best_idx]["name"]
         best_distance = float(distances[best_idx])
 
-        return best_name, best_distance
+        # Closest distance among embeddings NOT belonging to best_name.
+        other_distances = [
+            float(d) for i, d in enumerate(distances)
+            if self.db.metadata[i]["name"] != best_name
+        ]
+        margin = (min(other_distances) - best_distance) if other_distances else float("inf")
+
+        return best_name, best_distance, margin

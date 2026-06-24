@@ -33,10 +33,10 @@ Python Vision Engine (FastAPI)
 
 ```bash
 # 1. Clone and enter project
-cd C:\Users\jtrip\Desktop\Projects\home-vision-01
+cd C:\Users\jtrip\Desktop\Projects\home-vision-ids
 
-# 2. Run setup (Windows PowerShell)
-.\setup.ps1
+# 2. Run setup (Windows CMD)
+setup.bat
 
 # 3. Fill in your .env values
 # Edit .env with your CAMERA_URL and Firebase config
@@ -48,7 +48,7 @@ python -m api.main
 ## Project Structure
 
 ```
-home-vision-01/
+home-vision-ids/
 ├── engine/              # AI vision engine
 │   ├── core/            # Detector, recognizer, alert logic
 │   ├── models/          # Pre-trained model files (.pt, .onnx)
@@ -67,7 +67,7 @@ home-vision-01/
 ├── docs/                # Documentation and diagrams
 ├── .env.example         # Environment variable template
 ├── requirements.txt     # Python dependencies
-└── setup.ps1            # One-click Windows setup script
+└── setup.bat            # One-click Windows setup script
 ```
 
 ## Environment Variables
@@ -84,7 +84,7 @@ API_SECRET_KEY=your-strong-secret-key
 ## Development Phases
 
 - [x] Phase 0 — Project setup
-- [ ] Phase 1 — Vision engine (YOLOv8n + DeepFace)
+- [x] Phase 1 — Vision engine (YOLOv8n + DeepFace)
 - [ ] Phase 2 — Backend & Firebase connectivity
 - [ ] Phase 3 — Flutter mobile app
 - [ ] Phase 4 — Integration testing

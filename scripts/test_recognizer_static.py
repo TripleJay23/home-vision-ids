@@ -57,6 +57,11 @@ def main():
                 f"{img_path} -> RECOGNIZED as '{result['name']}' "
                 f"(distance: {result['distance']:.3f})"
             )
+        elif status == "uncertain":
+            logger.warning(
+                f"{img_path} -> UNCERTAIN (closest '{result['name']}' at distance "
+                f"{result['distance']:.3f}, but margin {result['margin']:.3f} too small)"
+            )
         elif status == "unrecognized":
             logger.warning(
                 f"{img_path} -> UNRECOGNIZED (closest distance: {result['distance']:.3f}, "

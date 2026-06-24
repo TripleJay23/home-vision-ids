@@ -149,9 +149,19 @@ class TrackStateManager:
             entry.status = "unrecognized"
             logger.info(f"Track #{track_id} → unrecognized stranger (distance: {result.get('distance', '?'):.3f})")
 
-        elif status == "no_face":
-            # Face crop didn't yield a detectable face — don't update last_verified
-            # so the next should_recognize() call will try again promptly.
+        elif status in ("no_face", "uncertain"):
+            # "no_face": crop didn't yield a detectable face.
+            # "uncertain": a match was found but it sat too close to a second
+            # enrolled person to trust (see recognizer MIN_CONFIDENCE_MARGIN).
+            # In both cases we deliberately do NOT commit a name and reset
+            # last_verified to 0.0 so the next should_recognize() call retries
+            # promptly — a later frame (better angle/lighting) may resolve it.
+            if status == "uncertain":
+                logger.info(
+                    f"Track #{track_id} → uncertain match "
+                    f"(closest '{result.get('name')}', distance: {result.get('distance', '?'):.3f}, "
+                    f"margin: {result.get('margin', float('nan')):.3f}) — retrying."
+                )
             entry.last_verified = 0.0
 
     # ── Label / display ───────────────────────────────────────────────────
