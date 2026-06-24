@@ -21,8 +21,10 @@ DESIGN.md
 data/faces/*
 tests/test_images/*
 data/embeddings/*
+data/alerts/*
 !data/faces/.gitkeep
 !data/embeddings/.gitkeep
+!data/alerts/.gitkeep
 
 # ── Firebase credentials ─────────────────────────────────────
 config/firebase-credentials.json

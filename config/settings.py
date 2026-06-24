@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     embeddings_path: Path = Field(Path("data/embeddings"), env="EMBEDDINGS_PATH")
     models_path: Path = Field(Path("engine/models"), env="MODELS_PATH")
     logs_path: Path = Field(Path("data/logs"), env="LOGS_PATH")
+    alerts_path: Path = Field(Path("data/alerts"), env="ALERTS_PATH")
 
     # Firebase
     firebase_credentials_path: Path = Field(..., env="FIREBASE_CREDENTIALS_PATH")
