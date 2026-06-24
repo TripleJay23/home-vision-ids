@@ -153,7 +153,6 @@ class TrackStateManager:
             # Face crop didn't yield a detectable face — don't update last_verified
             # so the next should_recognize() call will try again promptly.
             entry.last_verified = 0.0
-            logger.debug(f"Track #{track_id} → no face detected in crop, will retry.")
 
     # ── Label / display ───────────────────────────────────────────────────
 
