@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     confidence_threshold: float = Field(0.60, env="CONFIDENCE_THRESHOLD")
     person_confirm_seconds: float = Field(1.0, env="PERSON_CONFIRM_SECONDS")
     alert_cooldown_seconds: int = Field(60, env="ALERT_COOLDOWN_SECONDS")
+    # Minimum person bbox height (px) before attempting face recognition.
+    # Below this the face is too small to recognise reliably. Tune to the room:
+    # LOWER = recognises people further away (top-corner placement) but with less
+    # reliable embeddings; RAISE if distant faces produce bad matches. At 720p.
+    min_person_box_height: int = Field(120, env="MIN_PERSON_BOX_HEIGHT")
 
     # Paths
     faces_db_path: Path = Field(Path("data/faces"), env="FACES_DB_PATH")

@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 from loguru import logger
 
+from config.settings import settings
 from engine.utils.stream import VideoStream
 from engine.core.detector import ObjectDetector
 from engine.core.recognizer import FaceRecognizer
@@ -34,9 +35,9 @@ from engine.core.alerter import build_alert_service
 # whole body. Mirrors scripts/test_recognition.py.
 FACE_CROP_RATIO = 0.45
 
-# Person boxes shorter than this (pixels) are too far for a reliable face crop.
-# Calibrated at 720p: a person box under ~180px is typically several metres off.
-MIN_PERSON_BOX_HEIGHT = 180
+# Min person bbox height to attempt recognition comes from settings
+# (MIN_PERSON_BOX_HEIGHT) so it can be tuned per room without a code change —
+# lower it to recognise people further from a top-corner camera.
 
 # One recognition worker keeps heavy DeepFace calls sequential (CPU-bound).
 MAX_RECOGNITION_WORKERS = 1
@@ -137,7 +138,7 @@ class VisionPipeline:
             return
 
         x1, y1, x2, y2 = [int(v) for v in det["bbox"]]
-        if (y2 - y1) < MIN_PERSON_BOX_HEIGHT:
+        if (y2 - y1) < settings.min_person_box_height:
             # Too far for a usable face crop — release in-flight, retry later.
             with self._state_lock:
                 self.state.update_result(track_id, {"status": "no_face", "name": None, "distance": None})

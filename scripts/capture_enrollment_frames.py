@@ -1,15 +1,18 @@
 """
 Guided enrollment capture tool.
 
-Walks the person through 6 poses with on-screen prompts, captures 2 frames
-per pose (12 total), then automatically runs enrollment — all in one command.
+Walks the person through several poses (including mid/far distance and a
+looking-up angle, matching a top-corner camera) with on-screen prompts,
+captures N frames per pose, then automatically runs enrollment — all in one
+command. Default is 8 poses x 3 shots = 24 frames; more variety + more samples
+= better recognition across angles and distances.
 
 Usage:
-    python scripts/capture_enrollment_frames.py <name>
+    python scripts/capture_enrollment_frames.py <name> [--shots N]
 
 Example:
-    python scripts/capture_enrollment_frames.py jordan
-    python scripts/capture_enrollment_frames.py joshua
+    python scripts/capture_enrollment_frames.py joshua            # 3 shots/pose (24 total)
+    python scripts/capture_enrollment_frames.py joshua --shots 5  # 5 shots/pose (40 total)
 
 Controls during capture:
     SPACE — capture current pose frame
@@ -37,16 +40,20 @@ from engine.utils.stream import VideoStream
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FACES_DIR = PROJECT_ROOT / "data" / "faces"
 
-# Guided poses — 2 captures each = 12 total frames
+# Guided poses. Distance + looking-up poses mirror a top-corner camera, so the
+# recognizer gets reference embeddings at the angles/face-sizes it'll actually
+# see at runtime — not just close-up frontal shots.
 POSES = [
-    ("LOOK STRAIGHT at the camera",       "straight"),
-    ("TURN SLIGHTLY LEFT",                "left"),
-    ("TURN SLIGHTLY RIGHT",               "right"),
-    ("LOOK SLIGHTLY UP",                  "up"),
-    ("LOOK SLIGHTLY DOWN",                "down"),
-    ("ANY ANGLE you like (last one!)",    "free"),
+    ("LOOK STRAIGHT at the camera",            "straight"),
+    ("TURN SLIGHTLY LEFT",                     "left"),
+    ("TURN SLIGHTLY RIGHT",                    "right"),
+    ("LOOK UP (as if at a high corner camera)", "up"),
+    ("LOOK SLIGHTLY DOWN",                     "down"),
+    ("STEP BACK a few steps (mid distance)",   "mid"),
+    ("STEP BACK further away (far)",           "far"),
+    ("ANY ANGLE you like (last one!)",         "free"),
 ]
-CAPTURES_PER_POSE = 2
+DEFAULT_SHOTS_PER_POSE = 3
 
 
 def draw_ui(frame, instruction: str, pose_num: int, total_poses: int,
@@ -84,8 +91,14 @@ def main():
         description="Guided enrollment capture — walks through poses and auto-enrolls."
     )
     parser.add_argument("name", help="Person's name (e.g. jordan, joshua)")
+    parser.add_argument(
+        "--shots", type=int, default=DEFAULT_SHOTS_PER_POSE,
+        help=f"Frames captured per pose (default {DEFAULT_SHOTS_PER_POSE}; "
+             f"{len(POSES)} poses, so total = shots x {len(POSES)})",
+    )
     args = parser.parse_args()
 
+    shots_per_pose = max(1, args.shots)
     name = args.name.lower().strip()
     save_dir = FACES_DIR / name
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -116,7 +129,7 @@ def main():
         captured_this_pose = 0
         logger.info(f"Pose {pose_idx + 1}/{len(POSES)}: {instruction}")
 
-        while captured_this_pose < CAPTURES_PER_POSE:
+        while captured_this_pose < shots_per_pose:
             frame = stream.read()
             if frame is None:
                 continue
@@ -126,7 +139,7 @@ def main():
                 display,
                 instruction,
                 pose_idx + 1, len(POSES),
-                captured_this_pose, CAPTURES_PER_POSE,
+                captured_this_pose, shots_per_pose,
                 total_captured,
             )
 
@@ -144,7 +157,7 @@ def main():
                 cv2.imwrite(str(filename), frame)
                 captured_this_pose += 1
                 total_captured += 1
-                logger.success(f"  ✓ Captured {filename.name} ({captured_this_pose}/{CAPTURES_PER_POSE})")
+                logger.success(f"  ✓ Captured {filename.name} ({captured_this_pose}/{shots_per_pose})")
 
                 # Brief green flash feedback
                 flash = frame.copy()

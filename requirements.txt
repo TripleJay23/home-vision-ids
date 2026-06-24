@@ -1,6 +1,9 @@
 # ── Computer Vision ──────────────────────────────────────────
 ultralytics>=8.3.0
-opencv-python-headless>=4.10.0.84    # headless = no GUI, correct for server use
+opencv-python>=4.10.0.84              # full build (GUI). ultralytics depends on
+                                      # opencv-python anyway; pinning -headless
+                                      # too caused a double cv2 install and broke
+                                      # the imshow-based enrollment scripts.
 deepface>=0.0.93                      # pulls in tensorflow automatically
 
 # ── Backend ──────────────────────────────────────────────────

@@ -26,6 +26,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from loguru import logger
 
+from config.settings import settings
 from engine.utils.stream import VideoStream
 from engine.core.detector import ObjectDetector
 from engine.core.recognizer import FaceRecognizer
@@ -36,12 +37,11 @@ from engine.core.track_state import TrackStateManager
 # 0.45 = top 45% of the box — covers face + neck comfortably even for tall frames.
 FACE_CROP_RATIO = 0.45
 
-# Minimum person bounding box height in pixels before attempting recognition.
-# Below this the face region is too small for yunet to reliably detect —
-# person is too far from the camera. Skips submission entirely rather than
-# spamming "no face detected" retries that will never succeed.
-# At 640x480, a person box shorter than ~120px is typically 4-5m+ away.
-MIN_PERSON_BOX_HEIGHT = 120
+# Minimum person bounding box height before attempting recognition comes from
+# settings (MIN_PERSON_BOX_HEIGHT) — shared with the real pipeline so this debug
+# tool behaves identically. Below it the face is too small for yunet; lower the
+# setting to recognise people further from the camera.
+MIN_PERSON_BOX_HEIGHT = settings.min_person_box_height
 
 # Thread pool size: 1 worker keeps recognition truly sequential and prevents
 # multiple heavy DeepFace calls competing for CPU at once. Raise to 2 if a
