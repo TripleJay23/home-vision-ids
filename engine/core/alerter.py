@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from collections import deque
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -134,6 +135,7 @@ class AlertService:
             else settings.alert_cooldown_seconds
         )
         self._last_alert_at: dict[int, float] = {}  # track_id -> monotonic time
+        self._recent: deque[Alert] = deque(maxlen=100)  # newest-last ring buffer for the API
 
     def should_alert(self, track_id: int) -> bool:
         """True if this track hasn't alerted within the cooldown window."""
@@ -176,8 +178,14 @@ class AlertService:
             return None
 
         self._last_alert_at[track_id] = time.monotonic()
+        self._recent.append(alert)
         logger.warning(f"ALERT raised: unknown person (track #{track_id}) → {alert.alert_id}")
         return alert
+
+    def recent_alerts(self, limit: int = 20) -> list[Alert]:
+        """Return the most recent alerts, newest first (capped at `limit`)."""
+        items = list(self._recent)[-limit:]
+        return list(reversed(items))
 
     def forget(self, track_id: int) -> None:
         """Drop cooldown state for an evicted track to avoid unbounded growth."""

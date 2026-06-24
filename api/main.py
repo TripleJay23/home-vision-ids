@@ -5,6 +5,7 @@ from loguru import logger
 import uvicorn
 
 from config.settings import settings
+from api.services.pipeline import build_pipeline, get_pipeline
 
 
 @asynccontextmanager
@@ -14,9 +15,23 @@ async def lifespan(app: FastAPI):
     logger.info(f"Camera URL: {settings.camera_url}")
     logger.info(f"API running at http://{settings.api_host}:{settings.api_port}")
     logger.info("Docs available at http://localhost:8000/docs")
+
+    # Build the pipeline once (loads YOLO + recognizer models a single time)
+    # and start the background loop. A missing/unreachable camera must NOT stop
+    # the API from coming up — log it and let /stream report 503 until it's back.
+    pipeline = build_pipeline()
+    try:
+        pipeline.start()
+    except Exception as e:
+        logger.error(f"Vision pipeline failed to start (camera unavailable?): {e}")
+
     yield
+
     # ── Shutdown ─────────────────────────────────────────────
     logger.info("Home Vision IDS shutting down.")
+    p = get_pipeline()
+    if p is not None:
+        p.stop()
 
 
 app = FastAPI(
@@ -37,11 +52,11 @@ app.add_middleware(
 )
 
 
-# ── Routes (uncomment as they are built) ─────────────────────
-# from api.routes import stream, alerts, members
-# app.include_router(stream.router, prefix="/stream", tags=["Stream"])
-# app.include_router(alerts.router, prefix="/alerts", tags=["Alerts"])
-# app.include_router(members.router, prefix="/members", tags=["Members"])
+# ── Routes ───────────────────────────────────────────────────
+from api.routes import stream, alerts
+app.include_router(stream.router, prefix="/stream", tags=["Stream"])
+app.include_router(alerts.router, prefix="/alerts", tags=["Alerts"])
+# app.include_router(members.router, prefix="/members", tags=["Members"])  # Phase 2 follow-up
 
 
 @app.get("/", tags=["System"])

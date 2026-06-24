@@ -44,6 +44,7 @@ class TrackEntry:
     last_verified: float = 0.0          # 0 = never verified
     name: str | None = None             # None = not yet recognized
     status: str = "pending"             # pending | recognized | unrecognized
+    distance: float | None = None       # closest DB distance at last decision (for alert context)
     recognition_in_flight: bool = False # True = a recognition thread is running for this track
 
 
@@ -142,11 +143,13 @@ class TrackStateManager:
         if status == "recognized":
             entry.name = result["name"]
             entry.status = "recognized"
+            entry.distance = result.get("distance")
             logger.info(f"Track #{track_id} → recognized as '{entry.name}' (distance: {result.get('distance', '?'):.3f})")
 
         elif status == "unrecognized":
             entry.name = None
             entry.status = "unrecognized"
+            entry.distance = result.get("distance")
             logger.info(f"Track #{track_id} → unrecognized stranger (distance: {result.get('distance', '?'):.3f})")
 
         elif status in ("no_face", "uncertain"):
@@ -185,6 +188,17 @@ class TrackStateManager:
 
         return "stranger"
 
+    def status_and_distance(self, track_id: int) -> tuple[str, float | None]:
+        """
+        Return (status, distance) for a track — the settled recognition state
+        the pipeline uses to decide whether to raise an alert. Returns
+        ("pending", None) for an unknown/never-seen track_id.
+        """
+        entry = self._tracks.get(track_id)
+        if entry is None:
+            return ("pending", None)
+        return (entry.status, entry.distance)
+
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
     def evict(self, track_id: int) -> None:
@@ -197,16 +211,21 @@ class TrackStateManager:
             entry = self._tracks.pop(track_id)
             logger.debug(f"Track #{track_id} ({entry.name or 'unidentified'}) evicted.")
 
-    def evict_stale(self, active_ids: set[int]) -> None:
+    def evict_stale(self, active_ids: set[int]) -> list[int]:
         """
         Evict all tracks whose track_id is no longer in the current frame's
         active detections. Call once per frame with the set of track_ids
         returned by detector.track() for that frame — this keeps the state
         dict from accumulating ghost entries indefinitely.
+
+        Returns the list of evicted track_ids so callers (e.g. the pipeline)
+        can release any per-track state they hold elsewhere, such as the
+        alerter's cooldown bookkeeping.
         """
         stale = [tid for tid in self._tracks if tid not in active_ids]
         for tid in stale:
             self.evict(tid)
+        return stale
 
     @property
     def active_count(self) -> int:
