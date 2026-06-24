@@ -19,3 +19,16 @@ class AlertListOut(BaseModel):
     """Recent alerts response."""
     count: int
     alerts: list[AlertOut]
+
+
+class MemberOut(BaseModel):
+    """One enrolled household member."""
+    name: str
+    embedding_count: int
+    enrolled_at: str | None = None  # most recent enrollment timestamp
+
+
+class MemberListOut(BaseModel):
+    """Enrolled members response."""
+    count: int
+    members: list[MemberOut]

@@ -53,10 +53,10 @@ app.add_middleware(
 
 
 # ── Routes ───────────────────────────────────────────────────
-from api.routes import stream, alerts
+from api.routes import stream, alerts, members
 app.include_router(stream.router, prefix="/stream", tags=["Stream"])
 app.include_router(alerts.router, prefix="/alerts", tags=["Alerts"])
-# app.include_router(members.router, prefix="/members", tags=["Members"])  # Phase 2 follow-up
+app.include_router(members.router, prefix="/members", tags=["Members"])
 
 
 @app.get("/", tags=["System"])
