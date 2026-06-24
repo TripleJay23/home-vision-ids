@@ -1,0 +1,124 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../config/config.dart';
+import '../services/providers.dart';
+
+/// Configure the backend base URL (and test reachability). This is what lets
+/// the same build work on home WiFi (LAN IP) or remotely (ngrok/relay URL)
+/// without rebuilding.
+class SettingsScreen extends ConsumerStatefulWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+  late final TextEditingController _controller;
+  bool _testing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: ref.read(backendUrlProvider));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final url = _controller.text.trim();
+    if (url.isEmpty) return;
+    await ref.read(backendUrlProvider.notifier).setUrl(url);
+    if (!mounted) return;
+    _controller.text = ref.read(backendUrlProvider);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backend URL saved')));
+  }
+
+  Future<void> _testConnection() async {
+    await _save(); // test what's actually configured
+    setState(() => _testing = true);
+    final ok = await ref.read(apiClientProvider).ping();
+    if (!mounted) return;
+    setState(() => _testing = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok ? 'Connected to backend ✓' : 'Could not reach backend ✗'),
+      backgroundColor: ok ? Colors.green.shade700 : Theme.of(context).colorScheme.error,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text('Backend connection', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            decoration: const InputDecoration(
+              labelText: 'Backend base URL',
+              hintText: kDefaultBackendUrl,
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.dns_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('Save'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  onPressed: _testing ? null : _testConnection,
+                  icon: _testing
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.wifi_tethering),
+                  label: const Text('Test'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: const [
+                    Icon(Icons.info_outline, size: 20),
+                    SizedBox(width: 8),
+                    Text('Connecting your phone'),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text(
+                    '• Same WiFi: use the laptop\'s LAN IP, e.g. $kDefaultBackendUrl\n'
+                    '• Phone and laptop must be on the same network.\n'
+                    '• Remote access: use an ngrok/relay URL instead.\n'
+                    '• A phone can never reach the backend\'s "localhost".',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
