@@ -19,6 +19,7 @@ DESIGN.md
 
 # ── Sensitive / Biometric data ───────────────────────────────
 data/faces/*
+tests/test_images/*
 data/embeddings/*
 !data/faces/.gitkeep
 !data/embeddings/.gitkeep
