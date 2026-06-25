@@ -22,9 +22,11 @@ data/faces/*
 tests/test_images/*
 data/embeddings/*
 data/alerts/*
+data/fcm_tokens.json
 !data/faces/.gitkeep
 !data/embeddings/.gitkeep
 !data/alerts/.gitkeep
+.claude/*
 
 # ── Firebase credentials ─────────────────────────────────────
 config/firebase-credentials.json

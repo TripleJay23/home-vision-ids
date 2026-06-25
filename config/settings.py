@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Firebase
     firebase_credentials_path: Path = Field(..., env="FIREBASE_CREDENTIALS_PATH")
     firebase_storage_bucket: str = Field(..., env="FIREBASE_STORAGE_BUCKET")
+    fcm_tokens_path: Path = Field(Path("data/fcm_tokens.json"), env="FCM_TOKENS_PATH")
 
     # API
     api_host: str = Field("0.0.0.0", env="API_HOST")

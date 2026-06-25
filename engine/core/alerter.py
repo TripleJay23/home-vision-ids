@@ -204,13 +204,46 @@ class AlertService:
 
 # ── Factory — the single swap point for Firebase ─────────────────────────────
 
+def _credentials_present() -> bool:
+    """True when a Firebase service-account file exists — enables FCM push."""
+    return Path(settings.firebase_credentials_path).exists()
+
+
+def _storage_configured() -> bool:
+    """True when a real Storage bucket is set — enables cloud snapshot upload."""
+    bucket = settings.firebase_storage_bucket or ""
+    return bool(bucket) and "your-app" not in bucket
+
+
 def build_alert_service() -> AlertService:
     """
-    Construct the AlertService with the active backends.
+    Construct the AlertService with the active backends. Three modes, decided
+    purely by what's configured — this factory is the only swap point:
 
-    TODAY: local snapshot store + stubbed FCM notifier (no Firebase needed).
-    LATER: when settings carry valid Firebase credentials, branch here to
-    return AlertService(FirebaseSnapshotStore(), FcmNotifier()). That is the
-    ONLY place that needs to change — see module docstring.
+      credentials + bucket  → Firebase Storage snapshots + FCM push
+      credentials, no bucket → LOCAL snapshots + FCM push   (Storage skipped)
+      no credentials         → local snapshots + stub notifier (fully offline)
     """
+    if _credentials_present():
+        try:
+            # Imported lazily so the offline path never touches firebase_admin.
+            from engine.core.firebase_backends import (
+                FcmNotifier,
+                FirebaseSnapshotStore,
+                init_firebase,
+            )
+
+            init_firebase()
+            notifier = FcmNotifier()
+            if _storage_configured():
+                logger.success("AlertService: Firebase Storage snapshots + FCM push.")
+                return AlertService(store=FirebaseSnapshotStore(), notifier=notifier)
+            logger.success("AlertService: local snapshots + Firebase FCM push (Storage skipped).")
+            return AlertService(store=LocalSnapshotStore(), notifier=notifier)
+        except Exception as e:
+            logger.error(
+                f"Firebase init failed ({e}); falling back to local store + stub notifier."
+            )
+
+    logger.info("AlertService using local snapshot store + stub notifier (no Firebase).")
     return AlertService(store=LocalSnapshotStore(), notifier=StubNotifier())

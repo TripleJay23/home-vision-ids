@@ -19,14 +19,26 @@ router = APIRouter()
 
 
 def _to_out(alert) -> AlertOut:
-    """Map an internal Alert to the API schema, exposing a fetchable snapshot URL."""
+    """Map an internal Alert to the API schema, exposing a fetchable snapshot URL.
+
+    The snapshot locator may be a remote URL (Firebase Storage signed URL) or a
+    local file path. For a remote URL the app fetches it directly; for a local
+    path we expose the backend's /alerts/<id>/snapshot proxy route.
+    """
+    snap = alert.snapshot_path
+    if snap and snap.startswith(("http://", "https://")):
+        snapshot_url = snap
+    elif snap:
+        snapshot_url = f"/alerts/{alert.alert_id}/snapshot"
+    else:
+        snapshot_url = None
     return AlertOut(
         alert_id=alert.alert_id,
         track_id=alert.track_id,
         created_at=alert.created_at,
         reason=alert.reason,
         distance=alert.distance,
-        snapshot_url=f"/alerts/{alert.alert_id}/snapshot" if alert.snapshot_path else None,
+        snapshot_url=snapshot_url,
     )
 
 
