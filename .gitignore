@@ -31,6 +31,8 @@ data/fcm_tokens.json
 # ── Firebase credentials ─────────────────────────────────────
 config/firebase-credentials.json
 config/*.json
+app/android/app/google-services.json
+app/ios/Runner/GoogleService-Info.plist
 
 # ── AI Models (large binaries) ───────────────────────────────
 engine/models/*.pt

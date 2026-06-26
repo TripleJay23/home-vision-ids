@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Talk to the FastAPI backend over the LAN (REST + MJPEG). -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Show FCM push notifications (runtime-prompted on Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="Home Vision IDS"
         android:name="${applicationName}"
@@ -33,6 +35,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- FCM: send background notifications to our high-importance channel so
+             they make a sound and slide down as a heads-up banner. The channel
+             itself is created by the app at startup (see push_service.dart). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="high_importance_alerts" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

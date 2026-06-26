@@ -41,6 +41,20 @@ class ApiClient {
     return list.map(Alert.fromJson).toList();
   }
 
+  /// Register this device's FCM token as a push target (POST /devices).
+  Future<void> registerDevice(String token) async {
+    final res = await http
+        .post(
+          Uri.parse('$baseUrl/devices'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'token': token}),
+        )
+        .timeout(_timeout);
+    if (res.statusCode != 200) {
+      throw ApiException('Device registration failed (HTTP ${res.statusCode}).');
+    }
+  }
+
   Future<List<Member>> getMembers() async {
     final res = await http.get(Uri.parse('$baseUrl/members')).timeout(_timeout);
     if (res.statusCode != 200) {

@@ -87,6 +87,16 @@ class FcmNotifier(Notifier):
             "snapshot_url": remote_url,
             "created_at": alert.created_at,
         }
+        # High priority + explicit high-importance channel + sound so the push
+        # makes a sound and shows as a heads-up banner (channel created natively
+        # in the app's MainActivity).
+        android = messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                channel_id="high_importance_alerts",
+                sound="default",
+            ),
+        )
         messages = [
             messaging.Message(
                 notification=messaging.Notification(
@@ -94,6 +104,7 @@ class FcmNotifier(Notifier):
                     body="Home Vision IDS spotted someone it doesn't recognise.",
                 ),
                 data=data,
+                android=android,
                 token=t,
             )
             for t in tokens
