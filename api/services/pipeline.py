@@ -30,10 +30,7 @@ from engine.core.detector import ObjectDetector
 from engine.core.recognizer import FaceRecognizer
 from engine.core.track_state import TrackStateManager
 from engine.core.alerter import build_alert_service
-
-# Top fraction of a person box handed to recognition — face + neck, not the
-# whole body. Mirrors scripts/test_recognition.py.
-FACE_CROP_RATIO = 0.45
+from engine.utils.face_crop import extract_face_crop
 
 # Min person bbox height to attempt recognition comes from settings
 # (MIN_PERSON_BOX_HEIGHT) so it can be tuned per room without a code change —
@@ -144,7 +141,7 @@ class VisionPipeline:
                 self.state.update_result(track_id, {"status": "no_face", "name": None, "distance": None})
             return
 
-        crop = self._face_crop(frame, det["bbox"])
+        crop = extract_face_crop(frame, det["bbox"])
         if crop.size == 0:
             with self._state_lock:
                 self.state.update_result(track_id, {"status": "no_face", "name": None, "distance": None})
@@ -194,15 +191,6 @@ class VisionPipeline:
         if ok:
             with self._frame_lock:
                 self._latest_jpeg = buf.tobytes()
-
-    @staticmethod
-    def _face_crop(frame: np.ndarray, bbox: list[float]) -> np.ndarray:
-        x1, y1, x2, y2 = [int(v) for v in bbox]
-        face_h = int((y2 - y1) * FACE_CROP_RATIO)
-        x1, y1 = max(0, x1), max(0, y1)
-        x2 = min(frame.shape[1], x2)
-        y2 = min(frame.shape[0], y1 + face_h)
-        return frame[y1:y2, x1:x2].copy()
 
     @staticmethod
     def _draw(frame: np.ndarray, det: dict, label: str) -> None:

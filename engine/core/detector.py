@@ -28,8 +28,29 @@ class ObjectDetector:
         logger.success("YOLO model loaded.")
 
     def detect(self, frame: np.ndarray) -> list[dict]:
-        # unchanged — see previous version
-        ...
+        """
+        Run detection only (no tracking) on a single frame. Used by enrollment,
+        which processes independent still images and only needs person boxes —
+        not stable track IDs. Mirrors track() minus the ByteTrack association.
+        """
+        results = self.model(
+            frame,
+            conf=self.confidence,
+            classes=list(TARGET_CLASSES.keys()),
+            verbose=False,
+        )
+
+        detections = []
+        for result in results:
+            for box in result.boxes:
+                class_id = int(box.cls[0])
+                detections.append({
+                    "class_id": class_id,
+                    "label": TARGET_CLASSES.get(class_id, "unknown"),
+                    "confidence": float(box.conf[0]),
+                    "bbox": box.xyxy[0].tolist(),
+                })
+        return detections
 
     def track(self, frame: np.ndarray) -> list[dict]:
         """

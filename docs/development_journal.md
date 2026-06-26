@@ -113,6 +113,7 @@ home-vision-ids/
 | 2026-06-24 | **Phase 3 complete.** Flutter app scaffolded (Riverpod, 4 screens, custom MJPEG widget); ran on a real Pixel 4a; live stream confirmed. |
 | 2026-06-26 | **Phase 4 complete.** Firebase FCM push wired end to end; verified live — a stranger in front of the camera produces a real push alert with sound on the phone. |
 | 2026-06-26 | This learning journal created. |
+| 2026-06-26 | **Phase 6 investigated.** Re-enrolled (24→32 shots), then refactored enrollment to mirror the runtime pipeline (shared crop + embedding). A decisive live A/B (real joshua vs stranger, side by side) proved strangers and the household occupy the **same** embedding range (stranger best-match 0.182 < real joshua's worst 0.35). Conclusion: recognition accuracy is a **fundamental limit** at this camera quality — accepted and documented. The refactor was kept (it fixed a real enroll-vs-runtime mismatch). |
 
 ---
 
@@ -594,6 +595,84 @@ getSystemService(NotificationManager::class.java).createNotificationChannel(chan
 - [ ] `Firebase.initializeApp()` + background handler in `main`
 - [ ] `PushService`: permission → token → `POST /devices` → handle messages
 - [ ] Live test: IP Webcam → backend → walk in as stranger → phone buzzes
+
+---
+
+## Phase 6 — Recognition Accuracy: a Fundamental Limit
+
+### 1. Goal
+Fix the symptom seen live in Phase 4.4: an unenrolled **stranger** being recognised as a
+household member (joshua) — a false positive that's serious for a security system.
+
+### 2. Theory
+ArcFace maps a face to a 512-D vector; we match by **cosine distance** to enrolled vectors.
+This only works if two different people's vectors are **farther apart** than the same person's
+vectors across frames. With a compressed phone-camera stream (and people who genuinely resemble
+each other), the embeddings of different people can **collapse together** — at which point *no*
+threshold separates them, because the separation simply isn't there in the data.
+
+Two hypotheses were tested and rejected:
+1. **Not enough/representative enrollment** → re-enrolled at 32 shots with distance + look-up
+   poses. Did **not** fix it.
+2. **Enroll-vs-runtime pipeline mismatch** → enrollment used `retinaface` on full frames while
+   runtime used `yunet` on person-crops; different alignment ⇒ different embedding space. We made
+   both use the **same** path. A genuine architectural fix — but it did **not** fix the accuracy.
+
+### 3. Files Modified (the refactor — worth keeping regardless)
+| File | Change |
+|---|---|
+| `engine/utils/face_crop.py` (new) | Single source of truth for the person→face crop (`FACE_CROP_RATIO`, `extract_face_crop`). |
+| `engine/core/recognizer.py` | New `extract_embedding(crop)` — the ONE embedding code path; `recognize()` uses it. |
+| `engine/core/detector.py` | Implemented `detect()` (detection without tracking) for enrollment. |
+| `scripts/enroll_face.py` | Rebuilt to enroll through the runtime path: frame → YOLO crop → yunet → ArcFace. |
+| `api/services/pipeline.py` | Uses the shared `extract_face_crop` (so runtime ≡ enrollment crop). |
+
+### 4. Step-by-Step
+1. Add `face_crop.py`; route both `pipeline` and `enroll_face` through it.
+2. Add `extract_embedding()`; route both `recognize()` and `enroll_face` through it.
+3. `python scripts/enroll_face.py --all` → rebuild embeddings from existing photos (no re-capture).
+4. **Decisive live A/B:** real joshua AND the stranger in frame together; read per-track distances.
+
+### 5. Code Explanation (the experiment that gave the answer)
+The whole point of the refactor in one idea: *enrol and recognise through identical code*, so a
+person's enrolled vectors and live vectors are comparable:
+```python
+# BOTH enroll_face.py and recognizer.recognize() now call:
+emb = extract_embedding(extract_face_crop(frame, person_bbox))   # YOLO crop → yunet → ArcFace
+```
+The measurement that settled it (real vs stranger, same DB, same moment):
+```
+real joshua : 0.20, 0.23, 0.25, 0.27, 0.30, 0.32, 0.35
+stranger    : 0.18(!), 0.41, 0.43, 0.53, 0.57, 0.59, 0.62
+```
+The stranger's **0.18** is below joshua's worst (**0.35**) → the distributions overlap → unseparable.
+
+### 6. Common Mistakes / Pitfalls
+- **Testing a recogniser on full frames vs. crops gives opposite results.** Feeding full 720p
+  frames to `yunet` returned "NO FACE" everywhere; feeding YOLO **person-crops** recognised fine.
+  Always test through the *same* input transform production uses.
+- **A single confident false match (0.18) means no threshold can help.** Don't chase threshold
+  tuning once you've seen the stranger dip *below* the real person's range.
+- **Parsing wrapped, ANSI-coloured, UTF-16 logs is painful.** Reconstruct records by splitting on
+  the timestamp and collapsing whitespace (see Appendix B) — or log to a file sink without colour.
+
+### 7. Key Takeaways
+- Face recognition quality is bounded by **camera quality and inter-person similarity** — beyond a
+  point, neither more data nor better thresholds help. Know when a problem is *data-limited*.
+- A negative result, proven rigorously (side-by-side A/B), is a real result — it tells you to stop
+  digging and **design around** the limit instead of fighting it.
+- **Design around it:** the system stays useful because the 10 s re-verification + "alert on any
+  >0.52 frame" make it **err toward alerting**. Future mitigations (not yet built): require
+  *temporal consistency* (a stranger's distance oscillates; a real member's is steady), a better
+  camera, or a second factor.
+
+### 8. Manual Rebuild Checklist
+- [ ] `face_crop.py` shared by `pipeline` + `enroll_face`
+- [ ] `extract_embedding()` shared by `recognize()` + `enroll_face`
+- [ ] `detector.detect()` implemented
+- [ ] `enroll_face.py` enrolls through YOLO-crop → yunet → ArcFace
+- [ ] `enroll_face.py --all`; restart backend
+- [ ] Accept that recognition is imperfect at this camera quality; rely on the alert safety net
 
 ---
 

@@ -43,6 +43,35 @@ MATCH_THRESHOLD = 0.52
 MIN_CONFIDENCE_MARGIN = 0.08
 
 
+def extract_embedding(face_crop: np.ndarray) -> np.ndarray | None:
+    """
+    Extract an ArcFace embedding from a face crop using the live detector
+    backend (yunet). Returns None if no face is detected.
+
+    THE single embedding code path, used by BOTH the live recognizer and
+    enrollment (scripts/enroll_face.py). This guarantees a person's enrolled
+    embeddings and their runtime query embeddings are produced identically —
+    same detector, same alignment — and are therefore directly comparable.
+
+    Why this matters: enrollment previously used `retinaface` on full frames
+    while runtime used `yunet` on person-crops. Different detectors align faces
+    differently, so the same face landed in a slightly different embedding
+    space at enroll vs. runtime. That mismatch smeared cosine distances and let
+    strangers match known people (observed live 2026-06-26). Routing both
+    through this one function removes the mismatch.
+    """
+    try:
+        results = DeepFace.represent(
+            img_path=face_crop,
+            model_name=EMBEDDING_MODEL,
+            detector_backend=LIVE_DETECTOR_BACKEND,
+            enforce_detection=True,
+        )
+    except ValueError:
+        return None
+    return np.asarray(results[0]["embedding"], dtype=np.float32)
+
+
 class FaceRecognizer:
     """Matches a face crop against the local known-faces database."""
 
@@ -72,20 +101,12 @@ class FaceRecognizer:
         Callers should treat it like "no_face" — retry on a later frame, do NOT
         commit the name — rather than as a confirmed identity.
         """
-        try:
-            results = DeepFace.represent(
-                img_path=face_crop,
-                model_name=EMBEDDING_MODEL,
-                detector_backend=LIVE_DETECTOR_BACKEND,
-                enforce_detection=True,
-            )
-        except ValueError:
+        query_embedding = extract_embedding(face_crop)
+        if query_embedding is None:
             # No face found in this crop (person facing away, occluded, etc.)
             # — distinct from "face found but unknown". Caller should retry,
             # not treat this as a confirmed stranger.
             return {"status": "no_face", "name": None, "distance": None}
-
-        query_embedding = np.asarray(results[0]["embedding"], dtype=np.float32)
 
         if self.db.embeddings.size == 0:
             return {"status": "no_known_faces", "name": None, "distance": None}
