@@ -114,6 +114,7 @@ home-vision-ids/
 | 2026-06-26 | **Phase 4 complete.** Firebase FCM push wired end to end; verified live — a stranger in front of the camera produces a real push alert with sound on the phone. |
 | 2026-06-26 | This learning journal created. |
 | 2026-06-26 | **Phase 6 investigated.** Re-enrolled (24→32 shots), then refactored enrollment to mirror the runtime pipeline (shared crop + embedding). A decisive live A/B (real joshua vs stranger, side by side) proved strangers and the household occupy the **same** embedding range (stranger best-match 0.182 < real joshua's worst 0.35). Conclusion: recognition accuracy is a **fundamental limit** at this camera quality — accepted and documented. The refactor was kept (it fixed a real enroll-vs-runtime mismatch). |
+| 2026-06-26 | **Phase 6b — temporal-consistency voting.** Since single frames can't be trusted but real members are steady while strangers oscillate, recognition now votes over a rolling 5-frame window (commit a name only at ≥4/5 agreement; default to stranger otherwise). Unit-tested against the real A/B vote sequence: the stranger's oscillation (incl. the 0.182 false match) now resolves to *stranger*. Mitigates the limit without fixing the unfixable embeddings. |
 
 ---
 
@@ -673,6 +674,73 @@ The stranger's **0.18** is below joshua's worst (**0.35**) → the distributions
 - [ ] `enroll_face.py` enrolls through YOLO-crop → yunet → ArcFace
 - [ ] `enroll_face.py --all`; restart backend
 - [ ] Accept that recognition is imperfect at this camera quality; rely on the alert safety net
+
+---
+
+## Phase 6b — Temporal-Consistency Voting (designing around the limit)
+
+### 1. Goal
+Given that single-frame recognition is unreliable (Phase 6), stop a stranger from *ever* being
+labelled a household member from one lucky frame — without needing to separate the embeddings
+(which we proved we can't).
+
+### 2. Theory
+The Phase 6 A/B data revealed the lever: a **real member's distance is steady** across frames
+(joshua ~0.20–0.35 every time) while a **stranger's oscillates** wildly (0.18 → 0.62, flipping
+between names and "unrecognized"). So instead of trusting one frame, accumulate recent
+recognitions as **votes** and require a **strong majority** before committing an identity. A
+track that never reaches a confident known majority is treated as a **stranger** — the
+security-safe default ("can't consistently recognise you ⇒ unknown"). This is a classic
+*temporal smoothing / majority-vote* technique; it converts noisy per-frame predictions into a
+stable decision.
+
+### 3. Files Modified
+| File | Change |
+|---|---|
+| `engine/core/track_state.py` | `TrackEntry` gains a `votes` deque + `confirmed` flag. `update_result()` records a vote and tallies the window instead of committing on one frame. New `_tally()`. New constants `VOTE_WINDOW=5`, `VOTE_MIN_AGREE=4`. |
+
+### 4. Step-by-Step
+1. Each recognition result becomes a vote token: a **name** (recognized), `_STRANGER`
+   (unrecognized), or `_UNCERTAIN`; `no_face` is not a vote.
+2. Push it into a `deque(maxlen=5)`.
+3. `_tally`: if any **name** has ≥ 4 of the 5 → `recognized`; else if the window is full (5) with
+   no such majority → `unrecognized` (stranger); else → `pending` (keep gathering).
+4. While `pending`, leave `last_verified = 0` so `should_recognize()` fires rapidly (votes gather
+   in ~1–2 s); once decided, set `last_verified = now` to drop back to the 10 s re-verify cadence.
+
+### 5. Code Explanation
+```python
+def _tally(votes):
+    window = list(votes)
+    names = Counter(v for v in window if v not in (_STRANGER, _UNCERTAIN))
+    if names and names.most_common(1)[0][1] >= VOTE_MIN_AGREE:
+        return ("recognized", names.most_common(1)[0][0])
+    if len(window) >= VOTE_WINDOW:
+        return ("unrecognized", None)   # full window, no confident known ⇒ stranger
+    return ("pending", None)
+```
+*Write-from-memory recipe:* keep a fixed-size deque of the last N predictions; count the names
+(ignore the not-a-known tokens); if one name dominates, commit it; if the window is full and none
+dominates, it's a stranger; otherwise wait for more.
+
+### 6. Common Mistakes / Pitfalls
+- **Tuning the majority too low.** At 3/5 the oscillating stranger occasionally got 3 "joshua"
+  frames in a window and slipped through. 4/5 is strict enough to reject the stranger while a
+  steady real member still passes easily. Validate the threshold against *real* vote sequences.
+- **Forgetting the security default.** If "no consensus" mapped to *pending forever*, a stranger
+  would never alert. Mapping a full-but-inconclusive window to **stranger** keeps the alert bias.
+
+### 7. Key Takeaways
+- When per-sample accuracy is capped, **aggregate over time**. Steadiness vs. noise is itself a
+  signal you can exploit.
+- Bias the default toward the safe outcome (here: unknown ⇒ alert).
+
+### 8. Manual Rebuild Checklist
+- [ ] `TrackEntry` has a `votes` deque (maxlen = VOTE_WINDOW) + `confirmed`
+- [ ] `update_result` appends a vote and calls `_tally` instead of committing on one frame
+- [ ] `_tally`: ≥4/5 same name ⇒ recognized; full window otherwise ⇒ stranger; else pending
+- [ ] `pending` keeps `last_verified = 0` (fast gather); a verdict sets it to now (slow re-verify)
+- [ ] Unit-test with a steady sequence (→ recognized) and an oscillating one (→ stranger)
 
 ---
 

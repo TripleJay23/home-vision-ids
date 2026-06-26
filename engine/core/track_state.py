@@ -16,6 +16,13 @@ design decisions from DESIGN.md:
    re-labels the track correctly, rather than leaving a wrong name stuck on
    a person indefinitely.
 
+3. TEMPORAL-CONSISTENCY VOTING (Phase 6) — an identity is never committed from
+   a single recognition. Recent results accumulate as votes; a name is only
+   committed when it wins a strong majority of the rolling window, and a track
+   that never reaches a confident known majority is treated as a stranger.
+   This exploits that real members are steady across frames while strangers
+   oscillate, removing single-frame false identities. See VOTE_* constants.
+
 This module is deliberately stateless about the recognizer itself —
 it only answers "should I recognize this track right now?" and stores
 whatever result the caller feeds back in. The actual DeepFace call lives
@@ -23,6 +30,7 @@ in recognizer.py (1c-3) and the threading wrapper lives in 1c-5/6.
 """
 
 import time
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from loguru import logger
 
@@ -33,6 +41,22 @@ CONFIRM_SECONDS = 1.0
 # How often to re-run recognition on an already-identified track.
 # Corrects ID swaps from ByteTrack crossing-occlusion within this window.
 REVERIFY_SECONDS = 10.0
+
+# ── Temporal-consistency voting (Phase 6 mitigation) ───────────────────────
+# A SINGLE recognition frame is unreliable: at consumer-camera quality a
+# stranger can momentarily match a known person (measured live: a stranger hit
+# distance 0.182 to 'joshua', better than real joshua's own worst frames at
+# ~0.35). But a REAL member's identity is steady frame-to-frame while a
+# stranger's oscillates. So we never commit an identity from one frame — we keep
+# a short rolling window of recent recognition "votes" and only commit
+# "recognized as X" when X wins a strong majority. If the window fills without a
+# confident known majority, the track is treated as a STRANGER (security-safe
+# default: someone we can't consistently recognise is unknown). Costs ~1-2s of
+# extra confirmation time; eliminates most single-frame false identities.
+VOTE_WINDOW = 5         # number of recent recognition votes considered
+VOTE_MIN_AGREE = 4      # one name must win at least this many of the window to commit
+_STRANGER = "__stranger__"    # vote token for an "unrecognized" result
+_UNCERTAIN = "__uncertain__"  # vote token for an "uncertain" (ambiguous) result
 
 
 @dataclass
@@ -46,6 +70,8 @@ class TrackEntry:
     status: str = "pending"             # pending | recognized | unrecognized
     distance: float | None = None       # closest DB distance at last decision (for alert context)
     recognition_in_flight: bool = False # True = a recognition thread is running for this track
+    votes: deque = field(default_factory=lambda: deque(maxlen=VOTE_WINDOW))  # recent vote tokens
+    confirmed: bool = False             # True once the window has committed a recognized/stranger verdict
 
 
 class TrackStateManager:
@@ -136,36 +162,81 @@ class TrackStateManager:
 
         entry = self._tracks[track_id]
         entry.recognition_in_flight = False
-        entry.last_verified = time.time()
 
         status = result.get("status")
 
-        if status == "recognized":
-            entry.name = result["name"]
-            entry.status = "recognized"
-            entry.distance = result.get("distance")
-            logger.info(f"Track #{track_id} → recognized as '{entry.name}' (distance: {result.get('distance', '?'):.3f})")
+        # "no_face" is not a vote — the crop simply had no detectable face this
+        # frame. Don't pollute the window; retry promptly.
+        if status == "no_face":
+            entry.last_verified = 0.0
+            return
 
+        # Turn the result into a single vote token and record the distance for
+        # alert context.
+        if status == "recognized":
+            vote = result["name"]
+        elif status == "uncertain":
+            vote = _UNCERTAIN
         elif status == "unrecognized":
+            vote = _STRANGER
+        else:
+            entry.last_verified = 0.0
+            return
+        entry.distance = result.get("distance")
+        entry.votes.append(vote)
+
+        # Tally the rolling window into a committed verdict.
+        decision, name = self._tally(entry.votes)
+
+        if decision == "pending":
+            # Not enough agreement yet — keep gathering votes rapidly
+            # (last_verified = 0 makes should_recognize() fire again next frame).
+            entry.status = "pending"
+            entry.confirmed = False
+            entry.last_verified = 0.0
+            return
+
+        # A verdict is committed; from here re-verify on the slow cadence.
+        entry.confirmed = True
+        entry.last_verified = time.time()
+        if decision == "recognized":
+            if entry.name != name or entry.status != "recognized":
+                logger.info(
+                    f"Track #{track_id} → recognized as '{name}' "
+                    f"({entry.votes.count(name)}/{len(entry.votes)} votes agree)."
+                )
+            entry.name = name
+            entry.status = "recognized"
+        else:  # "unrecognized"
+            if entry.status != "unrecognized":
+                logger.info(
+                    f"Track #{track_id} → stranger (no name reached {VOTE_MIN_AGREE}/"
+                    f"{VOTE_WINDOW} in window {list(entry.votes)})."
+                )
             entry.name = None
             entry.status = "unrecognized"
-            entry.distance = result.get("distance")
-            logger.info(f"Track #{track_id} → unrecognized stranger (distance: {result.get('distance', '?'):.3f})")
 
-        elif status in ("no_face", "uncertain"):
-            # "no_face": crop didn't yield a detectable face.
-            # "uncertain": a match was found but it sat too close to a second
-            # enrolled person to trust (see recognizer MIN_CONFIDENCE_MARGIN).
-            # In both cases we deliberately do NOT commit a name and reset
-            # last_verified to 0.0 so the next should_recognize() call retries
-            # promptly — a later frame (better angle/lighting) may resolve it.
-            if status == "uncertain":
-                logger.info(
-                    f"Track #{track_id} → uncertain match "
-                    f"(closest '{result.get('name')}', distance: {result.get('distance', '?'):.3f}, "
-                    f"margin: {result.get('margin', float('nan')):.3f}) — retrying."
-                )
-            entry.last_verified = 0.0
+    @staticmethod
+    def _tally(votes: "deque") -> tuple[str, str | None]:
+        """
+        Reduce the recent vote window to a verdict:
+            ("recognized", name)   — `name` won >= VOTE_MIN_AGREE of the window
+            ("unrecognized", None) — window full, no name reached the majority
+            ("pending", None)      — keep gathering votes
+
+        Only real names count toward the majority; _STRANGER / _UNCERTAIN votes
+        do not, so a person who can't be consistently recognised as ANY known
+        member falls through to "stranger" once the window fills.
+        """
+        window = list(votes)
+        names = Counter(v for v in window if v not in (_STRANGER, _UNCERTAIN))
+        if names:
+            name, count = names.most_common(1)[0]
+            if count >= VOTE_MIN_AGREE:
+                return ("recognized", name)
+        if len(window) >= VOTE_WINDOW:
+            return ("unrecognized", None)
+        return ("pending", None)
 
     # ── Label / display ───────────────────────────────────────────────────
 
