@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/providers.dart';
+import '../utils/format.dart';
 import 'widgets/async_views.dart';
 
 /// Enrolled household members from /members.
@@ -42,11 +43,22 @@ class MembersScreen extends ConsumerWidget {
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, i) {
                 final m = members[i];
+                final display = m.name.isEmpty
+                    ? '?'
+                    : '${m.name[0].toUpperCase()}${m.name.substring(1)}';
                 return ListTile(
-                  leading: CircleAvatar(child: Text(m.name.isNotEmpty ? m.name[0].toUpperCase() : '?')),
-                  title: Text(m.name),
-                  subtitle: m.enrolledAt != null ? Text('enrolled ${m.enrolledAt}') : null,
-                  trailing: Text('${m.embeddingCount} samples'),
+                  leading: CircleAvatar(
+                    backgroundColor: colorForName(m.name),
+                    foregroundColor: Colors.white,
+                    child: Text(m.name.isNotEmpty ? m.name[0].toUpperCase() : '?'),
+                  ),
+                  title: Text(display, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: m.enrolledAt != null ? Text('enrolled ${timeAgo(m.enrolledAt!)}') : null,
+                  trailing: Chip(
+                    avatar: const Icon(Icons.face_outlined, size: 18),
+                    label: Text('${m.embeddingCount}'),
+                    visualDensity: VisualDensity.compact,
+                  ),
                 );
               },
             ),

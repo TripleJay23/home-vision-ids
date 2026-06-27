@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/alert.dart';
 import '../services/api_client.dart';
 import '../services/providers.dart';
+import '../utils/format.dart';
 import 'widgets/async_views.dart';
 
 /// Recent unknown-person alerts from /alerts.
@@ -86,10 +87,24 @@ class _AlertCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_reasonLabel(alert.reason),
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                    Row(
+                      children: [
+                        Icon(Icons.person_off_outlined, size: 18, color: Theme.of(context).colorScheme.error),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(_reasonLabel(alert.reason),
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: 4),
-                    Text(alert.createdAt, style: Theme.of(context).textTheme.bodySmall),
+                    Row(
+                      children: [
+                        Icon(Icons.schedule, size: 14, color: Theme.of(context).textTheme.bodySmall?.color),
+                        const SizedBox(width: 4),
+                        Text(timeAgo(alert.createdAt), style: Theme.of(context).textTheme.bodySmall),
+                      ],
+                    ),
                     if (alert.distance != null)
                       Text('distance ${alert.distance!.toStringAsFixed(3)} · track #${alert.trackId}',
                           style: Theme.of(context).textTheme.bodySmall),
