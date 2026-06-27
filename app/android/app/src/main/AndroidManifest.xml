@@ -3,6 +3,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Show FCM push notifications (runtime-prompted on Android 13+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Device camera for in-app member enrollment. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
     <application
         android:label="Home Vision IDS"
         android:name="${applicationName}"

@@ -85,6 +85,18 @@ class FaceRecognizer:
                 f"{len(self.db.known_names())} known people: {self.db.known_names()}"
             )
 
+    def reload(self) -> None:
+        """
+        Reload the known-faces DB from disk. Call after enrollment changes so the
+        running pipeline recognises newly enrolled (or removed) people without an
+        API restart.
+        """
+        self.db = FaceDatabase()
+        logger.info(
+            f"Face DB reloaded: {len(self.db.metadata)} embeddings, "
+            f"{len(self.db.known_names())} known people: {self.db.known_names()}"
+        )
+
     def recognize(self, face_crop: np.ndarray) -> dict:
         """
         Identify a face crop against the known-faces database.

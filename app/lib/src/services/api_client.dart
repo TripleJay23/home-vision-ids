@@ -72,6 +72,51 @@ class ApiClient {
     return list.map(Member.fromJson).toList();
   }
 
+  // ── In-app enrollment ──────────────────────────────────────────────────
+
+  /// Upload one captured enrollment photo for [name] under [pose].
+  /// Returns the running count of photos saved for this member.
+  Future<int> uploadPhoto(String name, String pose, List<int> bytes) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/members/$name/photos?pose=$pose'))
+      ..headers.addAll(kBackendHeaders)
+      ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: '$pose.jpg'));
+    final res = await http.Response.fromStream(await req.send().timeout(const Duration(seconds: 20)));
+    if (res.statusCode != 200) {
+      throw ApiException('Photo upload failed (HTTP ${res.statusCode}).');
+    }
+    return (jsonDecode(res.body) as Map<String, dynamic>)['captured'] as int;
+  }
+
+  /// Build embeddings for [name] from the uploaded photos (heavy; ~tens of sec).
+  /// Returns the resulting embedding count.
+  Future<int> enrollMember(String name) async {
+    final res = await http
+        .post(Uri.parse('$baseUrl/members/$name/enroll'), headers: kBackendHeaders)
+        .timeout(const Duration(seconds: 90));
+    if (res.statusCode != 200) {
+      throw ApiException(_detailOf(res) ?? 'Enrollment failed (HTTP ${res.statusCode}).');
+    }
+    return (jsonDecode(res.body) as Map<String, dynamic>)['embedding_count'] as int;
+  }
+
+  /// Remove a member (embeddings + photos).
+  Future<void> deleteMember(String name) async {
+    final res = await http
+        .delete(Uri.parse('$baseUrl/members/$name'), headers: kBackendHeaders)
+        .timeout(_timeout);
+    if (res.statusCode != 200) {
+      throw ApiException(_detailOf(res) ?? 'Delete failed (HTTP ${res.statusCode}).');
+    }
+  }
+
+  String? _detailOf(http.Response res) {
+    try {
+      return (jsonDecode(res.body) as Map<String, dynamic>)['detail'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   String _describe(String what, int code) {
     if (code == 503) {
       return 'Vision pipeline not running (camera offline?). Start the backend and camera.';
