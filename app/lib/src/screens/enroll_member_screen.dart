@@ -4,16 +4,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/providers.dart';
 
-/// Guided poses — one capture each. Variety across angles gives the recogniser
-/// multiple reference embeddings per person.
+/// Guided poses — one capture each. Variety across angles AND distances gives
+/// the recogniser reference embeddings that match what a (often distant,
+/// top-corner) camera actually sees, not just close-up frontal shots.
 const List<(String, String)> _poses = [
   ('Look STRAIGHT at the camera', 'straight'),
   ('Turn slightly LEFT', 'left'),
   ('Turn slightly RIGHT', 'right'),
-  ('Tilt your head UP', 'up'),
-  ('Tilt your head DOWN', 'down'),
-  ('Any angle / smile', 'free'),
+  ('Look UP (like at a high corner camera)', 'up'),
+  ('Look slightly DOWN', 'down'),
+  ('Step BACK a few steps (mid distance)', 'mid'),
+  ('Step BACK further away (far)', 'far'),
+  ('Any angle you like', 'free'),
 ];
+
+/// Shots taken per pose on a single "Capture" tap (a quick burst). 8 poses ×
+/// this = the ~32 reference photos the recogniser wants for robustness, without
+/// 32 taps.
+const int _shotsPerPose = 4;
 
 enum _Phase { naming, capturing, enrolling, done }
 
@@ -36,6 +44,7 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
   int _poseIndex = 0;
   bool _busy = false;
   String? _error;
+  String? _status; // transient "Capturing 2/4…" during a burst
   String _name = '';
   int _enrolledCount = 0;
 
@@ -102,10 +111,18 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
       _error = null;
     });
     try {
-      final shot = await ctrl.takePicture();
-      final bytes = await shot.readAsBytes();
       final (_, tag) = _poses[_poseIndex];
-      await ref.read(apiClientProvider).uploadPhoto(_name, tag, bytes);
+      final api = ref.read(apiClientProvider);
+      // Burst: a few quick shots per pose for more reference embeddings.
+      for (var i = 0; i < _shotsPerPose; i++) {
+        setState(() => _status = 'Capturing ${i + 1}/$_shotsPerPose…');
+        final shot = await ctrl.takePicture();
+        await api.uploadPhoto(_name, tag, await shot.readAsBytes());
+        if (i < _shotsPerPose - 1) {
+          await Future.delayed(const Duration(milliseconds: 300));
+        }
+      }
+      setState(() => _status = null);
       if (_poseIndex + 1 >= _poses.length) {
         await _enroll();
       } else {
@@ -117,6 +134,7 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
     } catch (e) {
       setState(() {
         _error = 'Capture failed: $e';
+        _status = null;
         _busy = false;
       });
     }
@@ -171,8 +189,10 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
           Text('Add a household member', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           Text(
-            'You\'ll take ${_poses.length} quick photos at different angles. '
-            'Tip: enroll where the security camera will see them for best accuracy.',
+            'Walk through ${_poses.length} poses — different angles AND distances '
+            '(including stepping back). Each tap takes a quick burst of $_shotsPerPose '
+            'shots (~${_poses.length * _shotsPerPose} photos total) for accuracy. '
+            'Tip: enroll where the security camera will see them.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 20),
@@ -239,10 +259,12 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
                 Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                 const SizedBox(height: 8),
               ],
-              Text('Pose ${_poseIndex + 1} of ${_poses.length}',
-                  style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                _status ?? 'Pose ${_poseIndex + 1} of ${_poses.length}  ·  $_shotsPerPose shots each',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
               const SizedBox(height: 8),
-              LinearProgressIndicator(value: (_poseIndex) / _poses.length),
+              LinearProgressIndicator(value: _poseIndex / _poses.length),
               const SizedBox(height: 14),
               Row(
                 children: [
