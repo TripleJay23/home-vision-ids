@@ -5,6 +5,13 @@ import 'package:http/http.dart' as http;
 import '../models/alert.dart';
 import '../models/member.dart';
 
+/// Sent on EVERY backend request (REST, MJPEG stream, and snapshot images).
+/// Over an ngrok free tunnel, requests without this header get an HTML
+/// "browser warning" interstitial instead of the real response, which breaks
+/// JSON parsing and image loading. Harmless on a direct LAN backend (an unknown
+/// header is ignored). See Phase 5 (remote access).
+const Map<String, String> kBackendHeaders = {'ngrok-skip-browser-warning': 'true'};
+
 /// Thin REST client for the Home Vision IDS FastAPI backend.
 ///
 /// Stateless beyond [baseUrl]; recreated by the provider whenever the
@@ -24,7 +31,7 @@ class ApiClient {
   /// Quick reachability check against /health.
   Future<bool> ping() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/health')).timeout(_timeout);
+      final res = await http.get(Uri.parse('$baseUrl/health'), headers: kBackendHeaders).timeout(_timeout);
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -32,7 +39,7 @@ class ApiClient {
   }
 
   Future<List<Alert>> getAlerts({int limit = 20}) async {
-    final res = await http.get(Uri.parse('$baseUrl/alerts?limit=$limit')).timeout(_timeout);
+    final res = await http.get(Uri.parse('$baseUrl/alerts?limit=$limit'), headers: kBackendHeaders).timeout(_timeout);
     if (res.statusCode != 200) {
       throw ApiException(_describe('alerts', res.statusCode));
     }
@@ -46,7 +53,7 @@ class ApiClient {
     final res = await http
         .post(
           Uri.parse('$baseUrl/devices'),
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', ...kBackendHeaders},
           body: jsonEncode({'token': token}),
         )
         .timeout(_timeout);
@@ -56,7 +63,7 @@ class ApiClient {
   }
 
   Future<List<Member>> getMembers() async {
-    final res = await http.get(Uri.parse('$baseUrl/members')).timeout(_timeout);
+    final res = await http.get(Uri.parse('$baseUrl/members'), headers: kBackendHeaders).timeout(_timeout);
     if (res.statusCode != 200) {
       throw ApiException(_describe('members', res.statusCode));
     }

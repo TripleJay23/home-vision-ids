@@ -114,6 +114,7 @@ home-vision-ids/
 | 2026-06-26 | **Phase 4 complete.** Firebase FCM push wired end to end; verified live — a stranger in front of the camera produces a real push alert with sound on the phone. |
 | 2026-06-26 | This learning journal created. |
 | 2026-06-26 | **Phase 6 investigated.** Re-enrolled (24→32 shots), then refactored enrollment to mirror the runtime pipeline (shared crop + embedding). A decisive live A/B (real joshua vs stranger, side by side) proved strangers and the household occupy the **same** embedding range (stranger best-match 0.182 < real joshua's worst 0.35). Conclusion: recognition accuracy is a **fundamental limit** at this camera quality — accepted and documented. The refactor was kept (it fixed a real enroll-vs-runtime mismatch). |
+| 2026-06-27 | **Phase 5 — remote access.** An ngrok tunnel exposes the backend at a public HTTPS URL so the app reaches the stream + REST from anywhere. App sends `ngrok-skip-browser-warning` on every request so the free tier serves real responses, not its HTML interstitial. (Alerts already worked remotely — FCM is cloud-based.) |
 | 2026-06-26 | **Phase 6b — temporal-consistency voting.** Since single frames can't be trusted but real members are steady while strangers oscillate, recognition now votes over a rolling 5-frame window (commit a name only at ≥4/5 agreement; default to stranger otherwise). Unit-tested against the real A/B vote sequence: the stranger's oscillation (incl. the 0.182 false match) now resolves to *stranger*. Mitigates the limit without fixing the unfixable embeddings. |
 
 ---
@@ -596,6 +597,68 @@ getSystemService(NotificationManager::class.java).createNotificationChannel(chan
 - [ ] `Firebase.initializeApp()` + background handler in `main`
 - [ ] `PushService`: permission → token → `POST /devices` → handle messages
 - [ ] Live test: IP Webcam → backend → walk in as stranger → phone buzzes
+
+---
+
+## Phase 5 — Remote Access (beyond the LAN)
+
+### 1. Goal
+Let the app reach the backend (live stream + REST data) from **anywhere**, not just on home WiFi.
+
+### 2. Theory
+The phone reaches the backend by IP. On the LAN that's the laptop's `192.168.x.x`, which is
+**private** — unreachable from the internet. Three ways to fix it: (a) **port-forward** the
+router (fragile, exposes your network, needs a static IP/DDNS); (b) **deploy** the backend to a
+cloud VPS (overkill, and the camera is on the home LAN); (c) a **reverse tunnel** — a local agent
+dials *out* to a public relay that forwards traffic back. (c) is the right tradeoff: no router
+config, no inbound firewall holes, HTTPS for free. **ngrok** is the canonical tool.
+
+Important realisation: **alerts already work remotely.** FCM push is delivered by Google's cloud,
+independent of your LAN — so only the *pull* features (stream, alerts list, members, snapshots)
+needed the tunnel.
+
+### 3. Files Modified
+| File | Change |
+|---|---|
+| `app/lib/src/services/api_client.dart` | New `kBackendHeaders` (`ngrok-skip-browser-warning: true`); sent on every REST call. |
+| `app/lib/src/widgets/mjpeg_view.dart` | Sends the header on the MJPEG stream request. |
+| `app/lib/src/screens/alerts_screen.dart` | Sends the header on snapshot `Image.network` loads. |
+
+### 4. Step-by-Step
+1. `ngrok config add-authtoken <token>` (one-time; token from the ngrok dashboard).
+2. Start the backend: `python -m api.main`.
+3. `ngrok http 8000` → note the public `https://<random>.ngrok-free.dev` URL.
+4. App → **Settings** → set Backend URL to that public URL → Save.
+5. Test from the phone, ideally on **mobile data** (truly off-LAN).
+
+### 5. Code Explanation
+```dart
+// One header object, sent on REST, the MJPEG stream, AND snapshot images:
+const kBackendHeaders = {'ngrok-skip-browser-warning': 'true'};
+http.get(uri, headers: kBackendHeaders);                 // REST
+request.headers.addAll(kBackendHeaders);                 // MJPEG stream (http.Request)
+Image.network(url, headers: kBackendHeaders);            // snapshot images
+```
+*Why:* ngrok's free tier intercepts "browser-like" requests with a one-time HTML warning page. A
+request carrying this header is treated as a programmatic client and passed straight through. The
+header is meaningless to a direct-LAN backend, so it's safe to always send.
+
+### 6. Common Mistakes
+- **Forgetting the header on images/stream, not just REST.** The JSON worked but snapshots and the
+  live feed silently broke, because `Image.network` and the MJPEG request weren't sending it.
+- **Assuming the free URL is stable.** ngrok-free gives a *new random* URL each run — set it in the
+  app each session, or claim the one free **static domain** on your ngrok account for a fixed URL.
+
+### 7. Key Takeaways
+- A reverse tunnel is the least-effort way to expose a home service safely.
+- Separate *push* (works anywhere via FCM) from *pull* (needs reachability) — only the latter needs
+  the tunnel.
+
+### 8. Manual Rebuild Checklist
+- [ ] `kBackendHeaders` sent on REST, MJPEG, and snapshot image requests
+- [ ] ngrok authenticated; `ngrok http 8000` gives a public HTTPS URL
+- [ ] Public URL returns JSON (not the ngrok HTML page) when the header is sent
+- [ ] App Settings → Backend URL = public URL; test on mobile data
 
 ---
 

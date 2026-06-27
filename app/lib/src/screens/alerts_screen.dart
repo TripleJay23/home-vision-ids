@@ -76,7 +76,7 @@ class _AlertCard extends StatelessWidget {
                   height: 72,
                   child: url == null
                       ? const ColoredBox(color: Colors.black12, child: Icon(Icons.image_not_supported_outlined))
-                      : Image.network(url, fit: BoxFit.cover,
+                      : Image.network(url, fit: BoxFit.cover, headers: kBackendHeaders,
                           errorBuilder: (_, _, _) =>
                               const ColoredBox(color: Colors.black12, child: Icon(Icons.broken_image_outlined))),
                 ),
@@ -114,7 +114,7 @@ class _AlertCard extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            InteractiveViewer(child: Image.network(url)),
+            InteractiveViewer(child: Image.network(url, headers: kBackendHeaders)),
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
           ],
         ),
