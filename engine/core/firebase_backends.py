@@ -93,8 +93,8 @@ class FcmNotifier(Notifier):
         android = messaging.AndroidConfig(
             priority="high",
             notification=messaging.AndroidNotification(
-                channel_id="hv_security_alerts",
-                sound="alert",  # res/raw/alert.wav (the channel's bundled sound)
+                channel_id="high_importance_alerts",
+                sound="default",
             ),
         )
         messages = [

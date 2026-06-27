@@ -2,8 +2,6 @@ package com.homevision.home_vision_ids
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.media.AudioAttributes
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
@@ -11,37 +9,31 @@ import io.flutter.embedding.android.FlutterActivity
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        createAlertsChannel()
+        setUpAlertsChannel()
     }
 
-    // Create the high-importance notification channel natively, with the app's
-    // OWN bundled sound (res/raw/alert.wav) and an explicit vibration pattern,
-    // so alerts are always audible and buzz REGARDLESS of the phone's default
-    // notification sound (which may be set to "None"). Channels are immutable
-    // once created, so adding a bundled sound required a fresh channel id
-    // ("hv_security_alerts"); it must match the FCM default-channel meta-data in
-    // AndroidManifest. Created on every launch (idempotent) so it exists before
-    // any background FCM message arrives.
-    private fun createAlertsChannel() {
+    // Create the high-importance notification channel natively so it always
+    // exists before any background FCM message arrives (background notifications
+    // need the channel to pre-exist to show + vibrate). It uses the SYSTEM
+    // default notification sound — the user keeps their own choice. Must match
+    // the FCM default-channel meta-data in AndroidManifest.
+    //
+    // Also deletes the old bundled-custom-sound channel ("hv_security_alerts")
+    // so it stops appearing as a duplicate entry in the app's notification
+    // settings.
+    private fun setUpAlertsChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val soundUri = Uri.parse("android.resource://$packageName/raw/alert")
-            val audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.deleteNotificationChannel("hv_security_alerts")
             val channel = NotificationChannel(
-                "hv_security_alerts",
+                "high_importance_alerts",
                 "Security Alerts",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
                 description = "Unknown-person detections from Home Vision IDS"
-                setSound(soundUri, audioAttributes)
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 350, 200, 350)
-                enableLights(true)
             }
-            getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
+            manager.createNotificationChannel(channel)
         }
     }
 }

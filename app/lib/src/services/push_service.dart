@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,17 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/selected_tab.dart';
 import 'providers.dart';
 
-// High-importance channel → sound + heads-up banner. The id MUST match both the
-// FCM default-channel meta-data in AndroidManifest.xml AND the native channel
-// created in MainActivity.kt (which is authoritative for the bundled sound).
-const _channelId = 'hv_security_alerts';
+// High-importance channel → sound + heads-up banner. The id MUST match the FCM
+// default-channel meta-data in AndroidManifest.xml AND the native channel
+// created in MainActivity.kt. Uses the phone's system default notification sound.
+const _channelId = 'high_importance_alerts';
 const _channelName = 'Security Alerts';
 const _channelDesc = 'Unknown-person detections from Home Vision IDS';
-
-// The app's own bundled alert tone (res/raw/alert.wav) + vibration pattern, so
-// notifications sound and buzz regardless of the phone's default sound setting.
-const _alertSound = RawResourceAndroidNotificationSound('alert');
-final Int64List _vibrationPattern = Int64List.fromList(<int>[0, 350, 200, 350]);
 
 final FlutterLocalNotificationsPlugin _localNotifications =
     FlutterLocalNotificationsPlugin();
@@ -74,15 +67,11 @@ class PushService {
     );
     // Create the high-importance channel (idempotent) so foreground-shown and
     // background OS notifications both get sound + a heads-up banner.
-    final channel = AndroidNotificationChannel(
+    const channel = AndroidNotificationChannel(
       _channelId,
       _channelName,
       description: _channelDesc,
       importance: Importance.high,
-      sound: _alertSound,
-      playSound: true,
-      enableVibration: true,
-      vibrationPattern: _vibrationPattern,
     );
     await _localNotifications
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
@@ -106,7 +95,7 @@ class PushService {
       id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       title: n?.title ?? 'Unknown person detected',
       body: n?.body ?? "Home Vision IDS spotted someone it doesn't recognise.",
-      notificationDetails: NotificationDetails(
+      notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
@@ -114,10 +103,6 @@ class PushService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
-          sound: _alertSound,
-          playSound: true,
-          enableVibration: true,
-          vibrationPattern: _vibrationPattern,
         ),
       ),
       payload: message.data['alert_id'] ?? '',
