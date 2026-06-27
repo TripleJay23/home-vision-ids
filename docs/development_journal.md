@@ -116,6 +116,9 @@ home-vision-ids/
 | 2026-06-26 | **Phase 6 investigated.** Re-enrolled (24→32 shots), then refactored enrollment to mirror the runtime pipeline (shared crop + embedding). A decisive live A/B (real joshua vs stranger, side by side) proved strangers and the household occupy the **same** embedding range (stranger best-match 0.182 < real joshua's worst 0.35). Conclusion: recognition accuracy is a **fundamental limit** at this camera quality — accepted and documented. The refactor was kept (it fixed a real enroll-vs-runtime mismatch). |
 | 2026-06-27 | **Phase 5 — remote access.** An ngrok tunnel exposes the backend at a public HTTPS URL so the app reaches the stream + REST from anywhere. App sends `ngrok-skip-browser-warning` on every request so the free tier serves real responses, not its HTML interstitial. (Alerts already worked remotely — FCM is cloud-based.) |
 | 2026-06-26 | **Phase 6b — temporal-consistency voting.** Since single frames can't be trusted but real members are steady while strangers oscillate, recognition now votes over a rolling 5-frame window (commit a name only at ≥4/5 agreement; default to stranger otherwise). Unit-tested against the real A/B vote sequence: the stranger's oscillation (incl. the 0.182 false match) now resolves to *stranger*. Mitigates the limit without fixing the unfixable embeddings. |
+| 2026-06-27 | **Phase 5 — remote access.** ngrok tunnel exposes the backend publicly; app sends `ngrok-skip-browser-warning` on all requests (REST, MJPEG, snapshot images). FCM alerts already worked remotely (cloud). |
+| 2026-06-27 | **App polish.** Notifications: briefly bundled a custom sound for the "default sound = None" case, then reverted to the single system channel at the user's preference (deleting the orphaned channel natively). UI: relative times, colour-coded member avatars, a LIVE badge + recognition legend. |
+| 2026-06-27 | **Phase 7 — in-app enrollment.** Enroll members from the phone's camera: name → 8 guided poses (incl. distance) × a 4-shot burst (~32 photos) → backend builds embeddings + reloads. No laptop script needed. Validated on device. |
 
 ---
 
@@ -804,6 +807,87 @@ dominates, it's a stranger; otherwise wait for more.
 - [ ] `_tally`: ≥4/5 same name ⇒ recognized; full window otherwise ⇒ stranger; else pending
 - [ ] `pending` keeps `last_verified = 0` (fast gather); a verdict sets it to now (slow re-verify)
 - [ ] Unit-test with a steady sequence (→ recognized) and an oscillating one (→ stranger)
+
+---
+
+## Phase 7 — In-App Member Enrollment (device camera)
+
+### 1. Goal
+Let the user enroll a household member entirely from the phone — name, take guided pose photos,
+and register — without ever running the laptop CLI script.
+
+### 2. Theory
+Enrollment is just "build embeddings from photos of a person." The CLI already did this; the app
+needs to (a) capture photos and (b) hand them to the same enrollment code. Key decisions:
+- **Reuse one enrollment implementation.** Extracted `enroll_person()` into
+  `engine/core/enrollment.py` so the CLI and the API enroll *identically* (same YOLO-crop → yunet →
+  ArcFace path proven in Phase 6). Two copies would drift.
+- **Hot DB reload.** The running pipeline holds the face DB in memory; after enrolling we call
+  `recognizer.reload()` so the new member is recognised with no restart.
+- **Burst capture for depth.** One photo per pose (8) gives too few reference embeddings; the CLI
+  used ~32. Each "Capture" tap fires a 4-shot burst → ~32 photos in 8 taps.
+- **Caveat (accepted):** the device camera ≠ the MJPEG security camera, so app-enrolled members
+  may match slightly worse than CLI-enrolled ones — a UX-vs-accuracy trade the user chose.
+
+### 3. Files Created / Modified
+| File | Responsibility |
+|---|---|
+| `engine/core/enrollment.py` (new) | `enroll_person(name, dir, db, detector)` — shared by CLI + API. |
+| `scripts/enroll_face.py` | Now imports the shared `enroll_person`. |
+| `engine/core/recognizer.py` | `reload()` — re-read the DB after enrollment. |
+| `api/routes/members.py` | `POST /{name}/photos` (multipart), `POST /{name}/enroll`, `DELETE /{name}`. |
+| `app/.../enroll_member_screen.dart` (new) | Name → camera preview + guided poses + burst capture → enroll. |
+| `app/.../members_screen.dart` | "Enroll" FAB + swipe-to-delete (confirm). |
+| `app/.../api_client.dart` | `uploadPhoto` / `enrollMember` / `deleteMember`. |
+
+### 4. Step-by-Step
+1. `flutter pub add camera`; add `CAMERA` permission to the manifest.
+2. Backend: extract `enroll_person`; add the three `/members` endpoints; `recognizer.reload()`.
+3. App: `EnrollMemberScreen` — `availableCameras()` → `CameraController` → `takePicture()`; upload
+   each shot to `/photos?pose=…`; after the last pose call `/enroll`.
+4. Wire the Members FAB → push the screen; on return `ref.invalidate(membersProvider)`.
+
+### 5. Code Explanation
+The enroll endpoint runs heavy CV, so it's a **sync `def`** — FastAPI runs sync routes in a
+threadpool, keeping the async loop free:
+```python
+@router.post("/{name}/enroll")
+def enroll_member(name: str):          # sync def → threadpool
+    db = FaceDatabase()
+    added = enroll_person(name, FACES_DIR / name, db, get_pipeline().detector)
+    if added == 0: raise HTTPException(422, "No usable face found…")
+    db.save(); get_pipeline().recognizer.reload()   # recognised without a restart
+```
+The burst (Dart): one tap → N sequential captures (the camera can't overlap `takePicture`):
+```dart
+for (var i = 0; i < _shotsPerPose; i++) {
+  setState(() => _status = 'Capturing ${i+1}/$_shotsPerPose…');
+  final shot = await ctrl.takePicture();
+  await api.uploadPhoto(_name, tag, await shot.readAsBytes());
+  await Future.delayed(const Duration(milliseconds: 300)); // slight variation
+}
+```
+
+### 6. Common Mistakes / Pitfalls
+- **Importing from `scripts/` into `api/` is awkward** (scripts isn't a package). Putting the shared
+  logic in `engine/core/` fixed it and removed duplication.
+- **Reinstalling the app resets the `POST_NOTIFICATIONS` (and `CAMERA`) runtime permission** — the
+  prompt must be granted again, or features silently do nothing.
+- **Too few photos per pose** quietly lowers accuracy — match the CLI's depth (burst).
+- **FastAPI file uploads need `python-multipart`** (already in requirements) or `UploadFile` 500s.
+
+### 7. Key Takeaways
+- One implementation, many entry points: extract shared logic so the CLI and API can't diverge.
+- For a long CPU task in FastAPI, a plain `def` route (threadpool) beats blocking the event loop.
+- Reload in-memory state after a write so the running system reflects it immediately.
+
+### 8. Manual Rebuild Checklist
+- [ ] `engine/core/enrollment.py` shared by CLI + API; `recognizer.reload()` exists
+- [ ] `/members/{name}/photos|enroll`, `DELETE /members/{name}` (enroll is a sync def)
+- [ ] App: `camera` plugin + CAMERA permission
+- [ ] `EnrollMemberScreen`: poses (incl. distance) × burst → upload → enroll → success
+- [ ] Members FAB + swipe-to-delete; refresh on return
+- [ ] Test on device: ~32 photos → embeddings; member recognised without restart
 
 ---
 
