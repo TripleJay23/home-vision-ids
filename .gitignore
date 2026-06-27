@@ -16,6 +16,7 @@ env/
 AGENTS.md
 SKILLS.md
 DESIGN.md
+docs/
 
 # ── Sensitive / Biometric data ───────────────────────────────
 data/faces/*
