@@ -1,28 +1,23 @@
 # App icon — Home Vision IDS
 
-Concept: a security **shield** enclosing a **vision eye** (cyan iris) on a deep-blue
-gradient — "home security + computer vision". Ties to the app theme seed `#1565C0`.
+A user-supplied emblem: a **camera aperture/shutter wrapping a house** —
+"home + surveillance vision". Blue aperture + navy house on a **white** tile.
 
 ## Source of truth
-- `app_icon.png` — 1024² Android master (rounded corners, alpha).
-- `app_icon_ios.png` — 1024² iOS master (square, **no alpha** — App Store requirement).
-- `generate_icon.py` — Pillow generator that draws both masters from scratch.
+- `app_icon.jpeg` — 1024² emblem on a **transparent** background (the mark only).
+- `app_icon_master.png` — 1024² flattened preview (emblem over white).
+- `generate_icon.py` — rebuilds every platform icon from `app_icon.jpeg`.
+
+## Layout
+- **Android adaptive** (`mipmap-anydpi-v26/ic_launcher.xml`):
+  - foreground = `@mipmap/ic_launcher_foreground` (the transparent emblem, all 5 densities)
+  - background = `@color/ic_launcher_background` = `#FFFFFF` (`res/values/colors.xml`)
+  - The emblem sits in the central safe zone, so circle/squircle masking never clips it.
+- **Android legacy** `@mipmap/ic_launcher` — emblem flattened over white, 5 densities (pre-API-26).
+- **iOS** `AppIcon.appiconset` — emblem flattened over white, all sizes; the 1024 is alpha-free.
 
 ## Regenerate
-The platform icons were produced by drawing the masters, then resizing them into
-every density. No SVG rasterizer or `flutter_launcher_icons` is required.
-
 ```bash
-# 1. draw the masters
-python app/assets/icon/generate_icon.py <out_dir>
-# 2. resize into android mipmaps + ios appiconset (see scratchpad propagate script)
+python app/assets/icon/generate_icon.py   # reads app_icon.jpeg, writes all targets
 ```
-
-Targets written:
-- Android legacy `@mipmap/ic_launcher` — mdpi 48, hdpi 72, xhdpi 96, xxhdpi 144, xxxhdpi 192.
-- iOS `AppIcon.appiconset` — all sizes referenced by `Contents.json` (20–1024).
-
-## Notes
-- Android uses legacy icons only (no adaptive `mipmap-anydpi-v26`); the manifest
-  references `@mipmap/ic_launcher`. To add adaptive icons later, split the mark
-  (foreground) from the gradient (background) and add the v26 XML.
+Replace `app_icon.jpeg` with a new 1024² transparent-background mark and re-run.
