@@ -28,6 +28,9 @@ class _MjpegViewState extends State<MjpegView> {
   static const int _markerStart = 0xD8; // second byte of SOI (FF D8)
   static const int _markerEnd = 0xD9; // second byte of EOI (FF D9)
   static const int _maxBuffer = 2 << 20; // 2 MB guard against runaway growth
+  // Cap how long we wait to connect, so a down/unreachable backend surfaces
+  // "Live feed lost" instead of hanging forever on "Connecting…".
+  static const Duration _connectTimeout = Duration(seconds: 8);
 
   http.Client? _client;
   StreamSubscription<List<int>>? _sub;
@@ -48,7 +51,7 @@ class _MjpegViewState extends State<MjpegView> {
       _client = client;
       final request = http.Request('GET', Uri.parse(widget.streamUrl));
       request.headers.addAll(kBackendHeaders);
-      final response = await client.send(request);
+      final response = await client.send(request).timeout(_connectTimeout);
       if (response.statusCode != 200) {
         throw response.statusCode == 503
             ? 'Pipeline not running (camera offline?)'
@@ -64,6 +67,8 @@ class _MjpegViewState extends State<MjpegView> {
         onDone: () => _fail('Stream closed'),
         cancelOnError: true,
       );
+    } on TimeoutException {
+      _fail("Backend didn't respond. Check it's running and the URL in Settings.");
     } catch (e) {
       _fail('$e');
     }
