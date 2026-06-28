@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     stream_width: int = Field(1280, env="STREAM_WIDTH")
     stream_height: int = Field(720, env="STREAM_HEIGHT")
     stream_fps: int = Field(15, env="STREAM_FPS")
+    # Seconds without a fresh camera frame before the feed is treated as lost:
+    # the reader invalidates its last frame and the pipeline publishes a
+    # "signal lost" placeholder instead of freezing on the last good frame.
+    camera_stale_seconds: float = Field(2.0, env="CAMERA_STALE_SECONDS")
 
     # AI Engine
     yolo_model: str = Field("yolov8n.pt", env="YOLO_MODEL")

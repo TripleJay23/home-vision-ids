@@ -25,6 +25,7 @@ class VideoStream:
         self.url = url or settings.camera_url
         self.cap = None
         self.frame = None
+        self.last_frame_time = 0.0   # monotonic time of the most recent good frame
         self.running = False
         self._thread = None
         self._lock = threading.Lock()
@@ -58,17 +59,29 @@ class VideoStream:
             if ret:
                 with self._lock:
                     self.frame = frame
+                    self.last_frame_time = time.monotonic()
+                consecutive_failures = 0
+                continue
+
+            consecutive_failures += 1
+            logger.warning(f"Frame read failed ({consecutive_failures} in a row)")
+
+            # Once the feed has been dead longer than the stale window, drop the
+            # last frame so read()/is_connected() report the loss instead of
+            # handing back a stale frame forever (which froze the live view).
+            if (time.monotonic() - self.last_frame_time) >= settings.camera_stale_seconds:
+                with self._lock:
+                    self.frame = None
+
+            if consecutive_failures >= 10:
+                logger.error("Stream lost. Attempting reconnect in 3 seconds...")
+                time.sleep(3)
+                self.cap.release()
+                self.cap = cv2.VideoCapture(self.url)
                 consecutive_failures = 0
             else:
-                consecutive_failures += 1
-                logger.warning(f"Frame read failed ({consecutive_failures} in a row)")
-
-                if consecutive_failures >= 10:
-                    logger.error("Stream lost. Attempting reconnect in 3 seconds...")
-                    time.sleep(3)
-                    self.cap.release()
-                    self.cap = cv2.VideoCapture(self.url)
-                    consecutive_failures = 0
+                # Avoid busy-spinning on cap.read() while the camera is down.
+                time.sleep(0.1)
 
     def read(self):
         """Return the latest frame. Returns None if no frame available yet."""

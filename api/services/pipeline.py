@@ -59,6 +59,7 @@ class VisionPipeline:
         self._state_lock = threading.Lock()
         self._frame_lock = threading.Lock()
         self._latest_jpeg: bytes | None = None
+        self._signal_lost_jpeg_cache: bytes | None = None  # built once, on demand
 
         self._running = False
         self._thread: threading.Thread | None = None
@@ -96,6 +97,11 @@ class VisionPipeline:
         while self._running:
             frame = self.stream.read()
             if frame is None:
+                # Camera down or no frame yet — surface a "signal lost" frame so
+                # the live view shows the loss instead of freezing on the last
+                # good frame. Sleep to avoid spinning while the feed is dead.
+                self._publish_signal_lost()
+                time.sleep(0.2)
                 continue
 
             detections = self.detector.track(frame)
@@ -191,6 +197,27 @@ class VisionPipeline:
         if ok:
             with self._frame_lock:
                 self._latest_jpeg = buf.tobytes()
+
+    def _publish_signal_lost(self) -> None:
+        """Publish a 'camera signal lost' placeholder as the latest frame."""
+        with self._frame_lock:
+            self._latest_jpeg = self._signal_lost_frame()
+
+    def _signal_lost_frame(self) -> bytes:
+        """A black frame with a 'CAMERA SIGNAL LOST' banner. Built once, cached."""
+        if self._signal_lost_jpeg_cache is None:
+            w, h = settings.stream_width, settings.stream_height
+            frame = np.zeros((h, w, 3), dtype=np.uint8)
+            text = "CAMERA SIGNAL LOST"
+            font, fscale, thick = cv2.FONT_HERSHEY_SIMPLEX, 1.4, 3
+            (tw, th), _ = cv2.getTextSize(text, font, fscale, thick)
+            cv2.putText(
+                frame, text, ((w - tw) // 2, (h + th) // 2),
+                font, fscale, (60, 60, 220), thick, cv2.LINE_AA,
+            )
+            ok, buf = cv2.imencode(".jpg", frame)
+            self._signal_lost_jpeg_cache = buf.tobytes() if ok else b""
+        return self._signal_lost_jpeg_cache
 
     @staticmethod
     def _draw(frame: np.ndarray, det: dict, label: str) -> None:
