@@ -4,9 +4,12 @@ A user-supplied emblem: a **camera aperture/shutter wrapping a house** —
 "home + surveillance vision". Blue aperture + navy house on a **white** tile.
 
 ## Source of truth
-- `app_icon.jpeg` — 1024² emblem on a **transparent** background (the mark only).
-- `app_icon_master.png` — 1024² flattened preview (emblem over white).
-- `generate_icon.py` — rebuilds every platform icon from `app_icon.jpeg`.
+- `emblem_source.png` — 1024² mark on a **transparent** background. The real source.
+- `app_icon.jpeg` / `app_icon_master.png` — 1024² previews on **white** (what ships).
+- `generate_icon.py` — crops the emblem tight, scales it to fill, and writes every
+  platform icon from `emblem_source.png`. The emblem is enlarged so it fills the
+  launcher circle (no empty ring): ~70% of the canvas for the masked adaptive
+  foreground, ~86% for the full-square legacy/iOS icons.
 
 ## Layout
 - **Android adaptive** (`mipmap-anydpi-v26/ic_launcher.xml`):
