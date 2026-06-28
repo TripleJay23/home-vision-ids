@@ -111,11 +111,14 @@ class _MjpegViewState extends State<MjpegView> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null && _frame == null) {
+    // Surface any stream error even if we still hold a decoded frame —
+    // otherwise a dropped connection would freeze on the last frame, looking
+    // live when it isn't. Tap the Reconnect action to retry.
+    if (_error != null) {
       return _StreamMessage(
         icon: Icons.videocam_off_outlined,
-        title: 'No live feed',
-        detail: _error!,
+        title: 'Live feed lost',
+        detail: '$_error\nTap reconnect to retry.',
       );
     }
     if (_frame == null) {

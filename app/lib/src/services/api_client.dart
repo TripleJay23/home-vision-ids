@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -38,8 +40,22 @@ class ApiClient {
     }
   }
 
+  /// GET helper that maps connection failures to a friendly offline message,
+  /// so screens show "can't reach the backend" instead of a raw exception.
+  Future<http.Response> _get(String path) async {
+    try {
+      return await http.get(Uri.parse('$baseUrl$path'), headers: kBackendHeaders).timeout(_timeout);
+    } on TimeoutException {
+      throw ApiException("Can't reach the backend — it timed out. Check it's running and the URL in Settings.");
+    } on SocketException {
+      throw ApiException("Can't reach the backend. Check it's running and the URL in Settings.");
+    } on http.ClientException {
+      throw ApiException("Can't reach the backend. Check it's running and the URL in Settings.");
+    }
+  }
+
   Future<List<Alert>> getAlerts({int limit = 20}) async {
-    final res = await http.get(Uri.parse('$baseUrl/alerts?limit=$limit'), headers: kBackendHeaders).timeout(_timeout);
+    final res = await _get('/alerts?limit=$limit');
     if (res.statusCode != 200) {
       throw ApiException(_describe('alerts', res.statusCode));
     }
@@ -63,7 +79,7 @@ class ApiClient {
   }
 
   Future<List<Member>> getMembers() async {
-    final res = await http.get(Uri.parse('$baseUrl/members'), headers: kBackendHeaders).timeout(_timeout);
+    final res = await _get('/members');
     if (res.statusCode != 200) {
       throw ApiException(_describe('members', res.statusCode));
     }
