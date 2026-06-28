@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -29,6 +30,16 @@ class ApiClient {
 
   /// Turn an API-relative snapshot path into a fetchable absolute URL.
   String snapshotUrl(String apiPath) => '$baseUrl$apiPath';
+
+  /// Download an alert snapshot's JPEG bytes (for saving to the gallery / cache).
+  /// [url] is the already-resolved fetch URL (see [snapshotUrl]).
+  Future<Uint8List> fetchSnapshotBytes(String url) async {
+    final res = await http.get(Uri.parse(url), headers: kBackendHeaders).timeout(_timeout);
+    if (res.statusCode != 200) {
+      throw ApiException('Snapshot unavailable (HTTP ${res.statusCode}).');
+    }
+    return res.bodyBytes;
+  }
 
   /// Quick reachability check against /health.
   Future<bool> ping() async {

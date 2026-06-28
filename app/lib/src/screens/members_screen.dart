@@ -38,7 +38,8 @@ class MembersScreen extends ConsumerWidget {
       body: membersAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ErrorRetry(message: '$e', onRetry: () => ref.invalidate(membersProvider)),
-        data: (members) {
+        data: (res) {
+          final members = res.data;
           if (members.isEmpty) {
             return const EmptyState(
               icon: Icons.person_off_outlined,
@@ -46,7 +47,7 @@ class MembersScreen extends ConsumerWidget {
               detail: 'Tap Enroll to add a household member from the camera.',
             );
           }
-          return RefreshIndicator(
+          final list = RefreshIndicator(
             onRefresh: () async => ref.invalidate(membersProvider),
             child: ListView.separated(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 88), // room for the FAB
@@ -85,6 +86,14 @@ class MembersScreen extends ConsumerWidget {
               },
             ),
           );
+          // Offline: same look as live (members rarely change), just the
+          // last-known roster with a thin "offline" hint above it.
+          if (res.fromCache) {
+            return Column(
+              children: [const OfflineBanner(), Expanded(child: list)],
+            );
+          }
+          return list;
         },
       ),
     );

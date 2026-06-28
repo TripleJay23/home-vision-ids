@@ -11,4 +11,11 @@ class Member {
         embeddingCount: json['embedding_count'] as int,
         enrolledAt: json['enrolled_at'] as String?,
       );
+
+  /// Inverse of [Member.fromJson] — same keys, for the offline cache.
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'embedding_count': embeddingCount,
+        'enrolled_at': enrolledAt,
+      };
 }

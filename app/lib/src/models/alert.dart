@@ -27,4 +27,15 @@ class Alert {
         distance: (json['distance'] as num?)?.toDouble(),
         snapshotUrl: json['snapshot_url'] as String?,
       );
+
+  /// Inverse of [Alert.fromJson] — same snake_case keys, so a list round-trips
+  /// through the local offline cache (see providers.dart).
+  Map<String, dynamic> toJson() => {
+        'alert_id': alertId,
+        'track_id': trackId,
+        'created_at': createdAt,
+        'reason': reason,
+        'distance': distance,
+        'snapshot_url': snapshotUrl,
+      };
 }

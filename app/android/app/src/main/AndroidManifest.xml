@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- Device camera for in-app member enrollment. -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Saving alert snapshots to the gallery needs no extra permission on API
+         29+ (MediaStore). On API <= 28 the camera plugin already contributes
+         WRITE_EXTERNAL_STORAGE, which gal reuses, so none is declared here. -->
     <application
         android:label="Home Vision IDS"
         android:name="${applicationName}"
