@@ -64,6 +64,8 @@ class VisionPipeline:
         self._running = False
         self._thread: threading.Thread | None = None
         self.fps = 0.0
+        self._fps_log_count = 0      # periodic perf-log throttle
+        self._recog_ms = 0.0         # last recognition inference time (ms)
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -106,9 +108,10 @@ class VisionPipeline:
 
             detections = self.detector.track(frame)
 
-            active_ids = {d["track_id"] for d in detections if d["track_id"] is not None}
+            # Drop tracks only after a grace period (not on the first missing
+            # frame), so detector flicker doesn't reset recognition state.
             with self._state_lock:
-                evicted = self.state.evict_stale(active_ids)
+                evicted = self.state.evict_expired()
             for tid in evicted:
                 self.alerter.forget(tid)
 
@@ -127,6 +130,14 @@ class VisionPipeline:
                 self.fps = frame_count / elapsed
                 frame_count = 0
                 fps_timer = time.time()
+                # Periodic performance insight (~every 5s) for tuning model size.
+                self._fps_log_count += 1
+                if self._fps_log_count >= 5:
+                    self._fps_log_count = 0
+                    logger.info(
+                        f"[perf] FPS {self.fps:.1f} | active tracks {self.state.active_count} "
+                        f"| last recog {self._recog_ms:.0f}ms"
+                    )
 
     # ── Per-track steps ──────────────────────────────────────────────────────
 
@@ -153,7 +164,14 @@ class VisionPipeline:
                 self.state.update_result(track_id, {"status": "no_face", "name": None, "distance": None})
             return
 
-        future = self._executor.submit(self.recognizer.recognize, crop)
+        def _timed_recognize(c):
+            t = time.time()
+            try:
+                return self.recognizer.recognize(c)
+            finally:
+                self._recog_ms = (time.time() - t) * 1000.0
+
+        future = self._executor.submit(_timed_recognize, crop)
 
         def on_done(f, tid=track_id):
             try:

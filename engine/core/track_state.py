@@ -42,6 +42,14 @@ CONFIRM_SECONDS = 1.0
 # Corrects ID swaps from ByteTrack crossing-occlusion within this window.
 REVERIFY_SECONDS = 10.0
 
+# Grace period before a track is dropped after its detection disappears. The
+# detector + ByteTrack flicker frame-to-frame (a person isn't detected every
+# single frame), and evicting on the first miss wiped the track's accumulated
+# votes AND reset its confirmation window — so members never reached the 4/5
+# vote majority and fell through to "stranger". Keeping the track (and its
+# votes) alive for this long lets recognition actually accumulate across gaps.
+EVICT_GRACE_SECONDS = 1.5
+
 # ── Temporal-consistency voting (Phase 6 mitigation) ───────────────────────
 # A SINGLE recognition frame is unreliable: at consumer-camera quality a
 # stranger can momentarily match a known person (measured live: a stranger hit
@@ -282,18 +290,20 @@ class TrackStateManager:
             entry = self._tracks.pop(track_id)
             logger.debug(f"Track #{track_id} ({entry.name or 'unidentified'}) evicted.")
 
-    def evict_stale(self, active_ids: set[int]) -> list[int]:
+    def evict_expired(self) -> list[int]:
         """
-        Evict all tracks whose track_id is no longer in the current frame's
-        active detections. Call once per frame with the set of track_ids
-        returned by detector.track() for that frame — this keeps the state
-        dict from accumulating ghost entries indefinitely.
+        Evict tracks not seen for EVICT_GRACE_SECONDS. Unlike evicting on the
+        first missing frame, this tolerates the detector's frame-to-frame
+        flicker: a track (and its votes / confirmation window) survives brief
+        gaps and is only dropped once the person has genuinely left. Call once
+        per frame; `update_seen` must be called for every currently-detected
+        track first so their last_seen stays current.
 
-        Returns the list of evicted track_ids so callers (e.g. the pipeline)
-        can release any per-track state they hold elsewhere, such as the
-        alerter's cooldown bookkeeping.
+        Returns the evicted track_ids so callers (e.g. the pipeline) can release
+        any per-track state they hold elsewhere, such as the alerter's cooldown.
         """
-        stale = [tid for tid in self._tracks if tid not in active_ids]
+        now = time.time()
+        stale = [tid for tid, e in self._tracks.items() if (now - e.last_seen) > EVICT_GRACE_SECONDS]
         for tid in stale:
             self.evict(tid)
         return stale
