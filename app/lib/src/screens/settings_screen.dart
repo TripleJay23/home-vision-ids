@@ -18,15 +18,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final TextEditingController _controller;
   bool _testing = false;
 
+  late final TextEditingController _keyController;
+
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: ref.read(backendUrlProvider));
+    _keyController = TextEditingController(text: ref.read(apiKeyProvider));
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _keyController.dispose();
     super.dispose();
   }
 
@@ -34,9 +38,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final url = _controller.text.trim();
     if (url.isEmpty) return;
     await ref.read(backendUrlProvider.notifier).setUrl(url);
+    await ref.read(apiKeyProvider.notifier).setKey(_keyController.text);
     if (!mounted) return;
     _controller.text = ref.read(backendUrlProvider);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Backend URL saved')));
+    _keyController.text = ref.read(apiKeyProvider);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
   }
 
   Future<void> _testConnection() async {
@@ -69,6 +75,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               hintText: kDefaultBackendUrl,
               border: OutlineInputBorder(),
               prefixIcon: Icon(Icons.dns_outlined),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _keyController,
+            autocorrect: false,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'API key',
+              hintText: "Matches the backend's API_SECRET_KEY",
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.key_outlined),
             ),
           ),
           const SizedBox(height: 12),

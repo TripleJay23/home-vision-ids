@@ -4,8 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-import '../services/api_client.dart' show kBackendHeaders;
-
 /// Renders an MJPEG (`multipart/x-mixed-replace`) HTTP stream.
 ///
 /// Flutter's `Image.network` only loads a single image, so it can't drive a
@@ -16,9 +14,15 @@ import '../services/api_client.dart' show kBackendHeaders;
 /// To force a reconnect, give the widget a new [key].
 class MjpegView extends StatefulWidget {
   final String streamUrl;
+  final Map<String, String> headers;
   final BoxFit fit;
 
-  const MjpegView({super.key, required this.streamUrl, this.fit = BoxFit.contain});
+  const MjpegView({
+    super.key,
+    required this.streamUrl,
+    this.headers = const {},
+    this.fit = BoxFit.contain,
+  });
 
   @override
   State<MjpegView> createState() => _MjpegViewState();
@@ -50,7 +54,7 @@ class _MjpegViewState extends State<MjpegView> {
       final client = http.Client();
       _client = client;
       final request = http.Request('GET', Uri.parse(widget.streamUrl));
-      request.headers.addAll(kBackendHeaders);
+      request.headers.addAll(widget.headers);
       final response = await client.send(request).timeout(_connectTimeout);
       if (response.statusCode != 200) {
         throw response.statusCode == 503

@@ -33,3 +33,27 @@ class BackendUrlNotifier extends Notifier<String> {
 
 final backendUrlProvider =
     NotifierProvider<BackendUrlNotifier, String>(BackendUrlNotifier.new);
+
+/// Empty by default — the user sets this in Settings to match the backend's
+/// API_SECRET_KEY. Sent as the `X-API-Key` header on every request; without it
+/// the backend rejects calls with 401.
+const String kDefaultApiKey = '';
+const String _kApiKeyKey = 'api_key';
+
+/// Holds the backend API key, persisted to SharedPreferences.
+class ApiKeyNotifier extends Notifier<String> {
+  @override
+  String build() {
+    final prefs = ref.watch(sharedPreferencesProvider);
+    return prefs.getString(_kApiKeyKey) ?? kDefaultApiKey;
+  }
+
+  Future<void> setKey(String key) async {
+    final cleaned = key.trim();
+    final prefs = ref.read(sharedPreferencesProvider);
+    await prefs.setString(_kApiKeyKey, cleaned);
+    state = cleaned;
+  }
+}
+
+final apiKeyProvider = NotifierProvider<ApiKeyNotifier, String>(ApiKeyNotifier.new);

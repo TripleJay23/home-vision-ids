@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/config.dart';
+import '../services/providers.dart';
 import '../widgets/mjpeg_view.dart';
 
 /// Live annotated MJPEG feed from the backend's /stream endpoint.
@@ -20,6 +21,7 @@ class _LiveViewScreenState extends ConsumerState<LiveViewScreen> {
   Widget build(BuildContext context) {
     final baseUrl = ref.watch(backendUrlProvider);
     final streamUrl = '$baseUrl/stream';
+    final headers = ref.watch(apiClientProvider).headers;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Live View'),
@@ -41,8 +43,10 @@ class _LiveViewScreenState extends ConsumerState<LiveViewScreen> {
                   color: Colors.black,
                   alignment: Alignment.center,
                   child: MjpegView(
-                    key: ValueKey('$streamUrl#$_reconnectToken'),
+                    // Include the key so changing it in Settings forces a reconnect.
+                    key: ValueKey('$streamUrl#$_reconnectToken#${headers['X-API-Key'] ?? ''}'),
                     streamUrl: streamUrl,
+                    headers: headers,
                   ),
                 ),
                 const Positioned(top: 12, left: 12, child: _LiveBadge()),

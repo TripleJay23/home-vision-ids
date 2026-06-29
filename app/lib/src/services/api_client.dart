@@ -17,13 +17,21 @@ const Map<String, String> kBackendHeaders = {'ngrok-skip-browser-warning': 'true
 
 /// Thin REST client for the Home Vision IDS FastAPI backend.
 ///
-/// Stateless beyond [baseUrl]; recreated by the provider whenever the
-/// configured backend URL changes.
+/// Stateless beyond [baseUrl] and [apiKey]; recreated by the provider whenever
+/// the configured backend URL or API key changes.
 class ApiClient {
   final String baseUrl;
-  ApiClient(this.baseUrl);
+  final String apiKey;
+  ApiClient(this.baseUrl, [this.apiKey = '']);
 
   static const _timeout = Duration(seconds: 8);
+
+  /// Headers for every request: the ngrok bypass plus the API key (when set).
+  /// Use this everywhere — REST, the MJPEG stream, and snapshot fetches.
+  Map<String, String> get headers => {
+        ...kBackendHeaders,
+        if (apiKey.isNotEmpty) 'X-API-Key': apiKey,
+      };
 
   /// MJPEG live stream endpoint (consumed by MjpegView, not http here).
   String get streamUrl => '$baseUrl/stream';
@@ -34,7 +42,7 @@ class ApiClient {
   /// Download an alert snapshot's JPEG bytes (for saving to the gallery / cache).
   /// [url] is the already-resolved fetch URL (see [snapshotUrl]).
   Future<Uint8List> fetchSnapshotBytes(String url) async {
-    final res = await http.get(Uri.parse(url), headers: kBackendHeaders).timeout(_timeout);
+    final res = await http.get(Uri.parse(url), headers: headers).timeout(_timeout);
     if (res.statusCode != 200) {
       throw ApiException('Snapshot unavailable (HTTP ${res.statusCode}).');
     }
@@ -44,7 +52,7 @@ class ApiClient {
   /// Quick reachability check against /health.
   Future<bool> ping() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/health'), headers: kBackendHeaders).timeout(_timeout);
+      final res = await http.get(Uri.parse('$baseUrl/health'), headers: headers).timeout(_timeout);
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -55,13 +63,13 @@ class ApiClient {
   /// so screens show "can't reach the backend" instead of a raw exception.
   Future<http.Response> _get(String path) async {
     try {
-      return await http.get(Uri.parse('$baseUrl$path'), headers: kBackendHeaders).timeout(_timeout);
+      return await http.get(Uri.parse('$baseUrl$path'), headers: headers).timeout(_timeout);
     } on TimeoutException {
-      throw ApiException("Can't reach the backend — it timed out. Check it's running and the URL in Settings.");
+      throw ApiException("Can't reach the backend — it timed out. Check it's running and the URL in Settings.", offline: true);
     } on SocketException {
-      throw ApiException("Can't reach the backend. Check it's running and the URL in Settings.");
+      throw ApiException("Can't reach the backend. Check it's running and the URL in Settings.", offline: true);
     } on http.ClientException {
-      throw ApiException("Can't reach the backend. Check it's running and the URL in Settings.");
+      throw ApiException("Can't reach the backend. Check it's running and the URL in Settings.", offline: true);
     }
   }
 
@@ -80,7 +88,7 @@ class ApiClient {
     final res = await http
         .post(
           Uri.parse('$baseUrl/devices'),
-          headers: {'Content-Type': 'application/json', ...kBackendHeaders},
+          headers: {'Content-Type': 'application/json', ...headers},
           body: jsonEncode({'token': token}),
         )
         .timeout(_timeout);
@@ -105,7 +113,7 @@ class ApiClient {
   /// Returns the running count of photos saved for this member.
   Future<int> uploadPhoto(String name, String pose, List<int> bytes) async {
     final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/members/$name/photos?pose=$pose'))
-      ..headers.addAll(kBackendHeaders)
+      ..headers.addAll(headers)
       ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: '$pose.jpg'));
     final res = await http.Response.fromStream(await req.send().timeout(const Duration(seconds: 20)));
     if (res.statusCode != 200) {
@@ -118,7 +126,7 @@ class ApiClient {
   /// Returns the resulting embedding count.
   Future<int> enrollMember(String name) async {
     final res = await http
-        .post(Uri.parse('$baseUrl/members/$name/enroll'), headers: kBackendHeaders)
+        .post(Uri.parse('$baseUrl/members/$name/enroll'), headers: headers)
         .timeout(const Duration(seconds: 90));
     if (res.statusCode != 200) {
       throw ApiException(_detailOf(res) ?? 'Enrollment failed (HTTP ${res.statusCode}).');
@@ -129,7 +137,7 @@ class ApiClient {
   /// Remove a member (embeddings + photos).
   Future<void> deleteMember(String name) async {
     final res = await http
-        .delete(Uri.parse('$baseUrl/members/$name'), headers: kBackendHeaders)
+        .delete(Uri.parse('$baseUrl/members/$name'), headers: headers)
         .timeout(_timeout);
     if (res.statusCode != 200) {
       throw ApiException(_detailOf(res) ?? 'Delete failed (HTTP ${res.statusCode}).');
@@ -145,6 +153,9 @@ class ApiClient {
   }
 
   String _describe(String what, int code) {
+    if (code == 401) {
+      return 'Unauthorized — set the correct API key in Settings.';
+    }
     if (code == 503) {
       return 'Vision pipeline not running (camera offline?). Start the backend and camera.';
     }
@@ -154,7 +165,13 @@ class ApiClient {
 
 class ApiException implements Exception {
   final String message;
-  ApiException(this.message);
+
+  /// True when the backend couldn't be reached at all (timeout/socket), as
+  /// opposed to a reachable backend returning an error status (401/503). Lets
+  /// callers fall back to cached data only when genuinely offline.
+  final bool offline;
+
+  ApiException(this.message, {this.offline = false});
   @override
   String toString() => message;
 }

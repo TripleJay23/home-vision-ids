@@ -22,7 +22,8 @@ class Offlineable<T> {
 /// refreshes anything that watches it.
 final apiClientProvider = Provider<ApiClient>((ref) {
   final baseUrl = ref.watch(backendUrlProvider);
-  return ApiClient(baseUrl);
+  final apiKey = ref.watch(apiKeyProvider);
+  return ApiClient(baseUrl, apiKey);
 });
 
 /// On-device cache of alert snapshot bytes (durable evidence storage).
@@ -68,8 +69,12 @@ Future<Offlineable<List<T>>> _fetchCached<T>({
     await prefs.setString(cacheKey, jsonEncode(items.map(toJson).toList()));
     return Offlineable(items);
   } catch (e) {
+    // Fall back to cache only when genuinely offline (couldn't reach the
+    // backend). A reachable backend returning an error — e.g. 401 (bad API
+    // key) or 503 — should surface, not silently show stale data.
+    final offline = e is! ApiException || e.offline;
     final cached = prefs.getString(cacheKey);
-    if (cached != null) {
+    if (offline && cached != null) {
       final list = (jsonDecode(cached) as List).cast<Map<String, dynamic>>().map(fromJson).toList();
       return Offlineable(list, fromCache: true);
     }
