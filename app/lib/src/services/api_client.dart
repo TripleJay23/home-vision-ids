@@ -83,6 +83,23 @@ class ApiClient {
     return list.map(Alert.fromJson).toList();
   }
 
+  /// Delete one alert (record + snapshot) on the backend.
+  Future<void> deleteAlert(String alertId) async {
+    final res = await http.delete(Uri.parse('$baseUrl/alerts/$alertId'), headers: headers).timeout(_timeout);
+    if (res.statusCode != 200) {
+      throw ApiException(_detailOf(res) ?? 'Delete failed (HTTP ${res.statusCode}).');
+    }
+  }
+
+  /// Clear all alerts (records + snapshots). Returns how many were removed.
+  Future<int> clearAlerts() async {
+    final res = await http.delete(Uri.parse('$baseUrl/alerts'), headers: headers).timeout(_timeout);
+    if (res.statusCode != 200) {
+      throw ApiException(_detailOf(res) ?? 'Clear failed (HTTP ${res.statusCode}).');
+    }
+    return (jsonDecode(res.body) as Map<String, dynamic>)['cleared'] as int;
+  }
+
   /// Register this device's FCM token as a push target (POST /devices).
   Future<void> registerDevice(String token) async {
     final res = await http

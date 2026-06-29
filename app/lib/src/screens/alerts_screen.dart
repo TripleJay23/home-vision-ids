@@ -22,6 +22,12 @@ class AlertsScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Alerts'),
         actions: [
+          if (alertsAsync.asData?.value.data.isNotEmpty ?? false)
+            IconButton(
+              tooltip: 'Clear all',
+              onPressed: () => _confirmClearAll(context, ref),
+              icon: const Icon(Icons.delete_sweep_outlined),
+            ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: () => ref.invalidate(alertsProvider),
@@ -47,7 +53,24 @@ class AlertsScreen extends ConsumerWidget {
               padding: const EdgeInsets.all(12),
               itemCount: alerts.length,
               separatorBuilder: (_, _) => const SizedBox(height: 8),
-              itemBuilder: (context, i) => _AlertCard(alert: alerts[i]),
+              itemBuilder: (context, i) {
+                final alert = alerts[i];
+                return Dismissible(
+                  key: ValueKey(alert.alertId),
+                  direction: DismissDirection.endToStart,
+                  confirmDismiss: (_) => _confirmDeleteOne(context, ref, alert),
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.onErrorContainer),
+                  ),
+                  child: _AlertCard(alert: alert),
+                );
+              },
             ),
           );
           // Offline: flag stale data and dim the list, but still show it.
@@ -63,6 +86,55 @@ class AlertsScreen extends ConsumerWidget {
         },
       ),
     );
+  }
+
+  Future<bool> _confirmDeleteOne(BuildContext context, WidgetRef ref, Alert alert) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Delete this alert?'),
+            content: const Text('Removes the alert and its snapshot.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+            ],
+          ),
+        ) ??
+        false;
+    if (!ok) return false;
+    try {
+      await ref.read(apiClientProvider).deleteAlert(alert.alertId);
+      ref.invalidate(alertsProvider);
+      return true;
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      return false;
+    }
+  }
+
+  Future<void> _confirmClearAll(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Clear all alerts?'),
+            content: const Text('Deletes every alert and its snapshot. This cannot be undone.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Clear all')),
+            ],
+          ),
+        ) ??
+        false;
+    if (!ok) return;
+    try {
+      final n = await ref.read(apiClientProvider).clearAlerts();
+      ref.invalidate(alertsProvider);
+      messenger.showSnackBar(SnackBar(content: Text('Cleared $n alert${n == 1 ? '' : 's'}')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Clear failed: $e')));
+    }
   }
 }
 
