@@ -206,6 +206,45 @@ class AlertService:
         """Drop cooldown state for an evicted track to avoid unbounded growth."""
         self._last_alert_at.pop(track_id, None)
 
+    def delete_alert(self, alert_id: str) -> bool:
+        """Delete one alert (record + local snapshot). Returns True if it existed."""
+        if self._repo is not None:
+            path = self._repo.delete(alert_id)
+            existed = path is not None
+        else:
+            match = next((a for a in self._recent if a.alert_id == alert_id), None)
+            existed = match is not None
+            path = match.snapshot_path if match else None
+            if match:
+                self._recent = deque(
+                    (a for a in self._recent if a.alert_id != alert_id), maxlen=self._recent.maxlen
+                )
+        self._unlink_snapshot(path)
+        return existed
+
+    def clear_alerts(self) -> int:
+        """Delete all alerts (records + local snapshots). Returns count removed."""
+        if self._repo is not None:
+            paths = self._repo.delete_all()
+        else:
+            paths = [a.snapshot_path for a in self._recent if a.snapshot_path]
+            self._recent.clear()
+        for p in paths:
+            self._unlink_snapshot(p)
+        return len(paths)
+
+    @staticmethod
+    def _unlink_snapshot(path: str | None) -> None:
+        """Remove a local snapshot file. Remote (http) locators are left alone."""
+        if not path or path.startswith(("http://", "https://")):
+            return
+        try:
+            f = Path(path)
+            if f.exists():
+                f.unlink()
+        except OSError as e:
+            logger.warning(f"Could not delete snapshot {path}: {e}")
+
     @staticmethod
     def _crop_snapshot(frame: np.ndarray, bbox: list[float]) -> np.ndarray:
         """Crop the head/shoulders region of a person bbox for the snapshot."""

@@ -56,6 +56,21 @@ async def list_alerts(limit: int = Query(20, ge=1, le=100)):
     return AlertListOut(count=len(alerts), alerts=alerts)
 
 
+@router.delete("", summary="Clear all alerts")
+async def clear_alerts():
+    alerter = _require_alerter()
+    removed = alerter.clear_alerts()
+    return {"cleared": removed}
+
+
+@router.delete("/{alert_id}", summary="Delete one alert")
+async def delete_alert(alert_id: str):
+    alerter = _require_alerter()
+    if not alerter.delete_alert(alert_id):
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"deleted": alert_id}
+
+
 @router.get("/{alert_id}/snapshot", summary="Fetch an alert's snapshot image")
 async def alert_snapshot(alert_id: str):
     alerter = _require_alerter()

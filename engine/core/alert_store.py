@@ -82,6 +82,26 @@ class AlertStore:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
 
+    def delete(self, alert_id: str) -> str | None:
+        """Delete one alert; return its snapshot_path (or None if not found)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT snapshot_path FROM alerts WHERE alert_id = ?", (alert_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute("DELETE FROM alerts WHERE alert_id = ?", (alert_id,))
+            self._conn.commit()
+            return row["snapshot_path"]
+
+    def delete_all(self) -> list[str]:
+        """Delete every alert; return all their snapshot_paths."""
+        with self._lock:
+            rows = self._conn.execute("SELECT snapshot_path FROM alerts").fetchall()
+            self._conn.execute("DELETE FROM alerts")
+            self._conn.commit()
+        return [r["snapshot_path"] for r in rows if r["snapshot_path"]]
+
     @staticmethod
     def _to_alert(row: sqlite3.Row):
         # Imported lazily to avoid a circular import (alerter imports this module).
