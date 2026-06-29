@@ -36,7 +36,7 @@ from loguru import logger
 
 # How long a track must be continuously visible before recognition fires.
 # Prevents wasting a DeepFace call on a person who immediately walks out.
-CONFIRM_SECONDS = 1.0
+CONFIRM_SECONDS = 0.5
 
 # How often to re-run recognition on an already-identified track.
 # Corrects ID swaps from ByteTrack crossing-occlusion within this window.
@@ -61,8 +61,12 @@ EVICT_GRACE_SECONDS = 1.5
 # confident known majority, the track is treated as a STRANGER (security-safe
 # default: someone we can't consistently recognise is unknown). Costs ~1-2s of
 # extra confirmation time; eliminates most single-frame false identities.
-VOTE_WINDOW = 5         # number of recent recognition votes considered
-VOTE_MIN_AGREE = 4      # one name must win at least this many of the window to commit
+# Smaller window = faster decisions. With RetinaFace's tighter embeddings a
+# 2-of-3 majority is enough to confirm a member, roughly halving how long it
+# takes to commit (each recognition is ~2s on CPU). Strangers still fall
+# through once the window fills without a name reaching the majority.
+VOTE_WINDOW = 3         # number of recent recognition votes considered
+VOTE_MIN_AGREE = 2      # one name must win at least this many of the window to commit
 _STRANGER = "__stranger__"    # vote token for an "unrecognized" result
 _UNCERTAIN = "__uncertain__"  # vote token for an "uncertain" (ambiguous) result
 

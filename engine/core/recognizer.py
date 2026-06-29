@@ -13,21 +13,18 @@ import numpy as np
 from deepface import DeepFace
 from loguru import logger
 
+from config.settings import settings
 from engine.core.face_db import FaceDatabase
 
 EMBEDDING_MODEL = "ArcFace"
 
-# Lighter detector backend than enrollment's "retinaface" — this runs inside
-# the live pipeline. Started with "opencv" (fastest, Haar-cascade) but static
-# testing showed it producing confidently-wrong matches on real strangers —
-# likely weak face alignment feeding noisy embeddings. Tried "mediapipe" next,
-# but it hits a currently-unresolved upstream bug (mp.solutions missing on
-# recent mediapipe releases, 0.10.31+, multiple open GitHub issues, no fix
-# yet). Settled on "yunet" instead: OpenCV's own CNN-based detector — still
-# fast, meaningfully better alignment than Haar-cascade "opencv", no broken
-# dependency. Threaded recognition (Phase 1c-5/6) means we have CPU headroom
-# to spend on accuracy here rather than squeezing every last bit of speed.
-LIVE_DETECTOR_BACKEND = "yunet"
+# Face detector backend for DeepFace, from settings (see face_detector_backend).
+# It MUST be identical for enrollment and runtime or embeddings won't be
+# comparable. History: "opencv"/Haar gave confidently-wrong matches (weak
+# alignment); "mediapipe" was broken upstream; "yunet" was a fast compromise.
+# Now defaulting to "retinaface" for markedly better alignment → tighter
+# embeddings, affordable because recognition is threaded + deferred. Always
+# read settings.face_detector_backend so enroll and runtime can't drift apart.
 
 # DeepFace's published cosine-distance threshold for ArcFace. Lower distance
 # = more similar; below this counts as a match.
@@ -64,7 +61,7 @@ def extract_embedding(face_crop: np.ndarray) -> np.ndarray | None:
         results = DeepFace.represent(
             img_path=face_crop,
             model_name=EMBEDDING_MODEL,
-            detector_backend=LIVE_DETECTOR_BACKEND,
+            detector_backend=settings.face_detector_backend,
             enforce_detection=True,
         )
     except ValueError:

@@ -35,18 +35,24 @@ class VideoStream:
         logger.info(f"Connecting to camera stream: {self.url}")
         self.cap = cv2.VideoCapture(self.url)
 
-        if not self.cap.isOpened():
-            logger.error(f"Failed to connect to stream: {self.url}")
-            raise ConnectionError(f"Cannot open camera stream at {self.url}")
-
-        # Set frame size to match settings
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.stream_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.stream_height)
+        if self.cap.isOpened():
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, settings.stream_width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, settings.stream_height)
+            # Keep the smallest possible buffer so we always read the freshest
+            # frame instead of draining a backlog — cuts perceived lag, and
+            # matters most for RTSP/H.264 which otherwise buffers several frames.
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            logger.success(f"Stream connected. Resolution: {settings.stream_width}x{settings.stream_height}")
+        else:
+            # Don't abort startup if the camera isn't up yet (sleeping phone, IP
+            # change, slow boot). Start the reader anyway — its reconnect loop
+            # keeps retrying and the pipeline serves a "signal lost" frame until
+            # the camera appears, then goes live automatically.
+            logger.warning(f"Camera not reachable yet at {self.url} — reader will keep retrying.")
 
         self.running = True
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
-        logger.success(f"Stream connected. Resolution: {settings.stream_width}x{settings.stream_height}")
         return self
 
     def _read_loop(self):

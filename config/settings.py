@@ -13,10 +13,18 @@ class Settings(BaseSettings):
     # the reader invalidates its last frame and the pipeline publishes a
     # "signal lost" placeholder instead of freezing on the last good frame.
     camera_stale_seconds: float = Field(2.0, env="CAMERA_STALE_SECONDS")
+    # JPEG quality (1-100) for the annotated /stream. Lower = smaller frames =
+    # less encode/transport/decode → a smoother preview on the phone.
+    stream_jpeg_quality: int = Field(60, env="STREAM_JPEG_QUALITY")
 
     # AI Engine
-    yolo_model: str = Field("yolov8n.pt", env="YOLO_MODEL")
+    yolo_model: str = Field("yolov8s.pt", env="YOLO_MODEL")
     face_model: str = Field("ArcFace", env="FACE_MODEL")
+    # DeepFace detector backend used for BOTH enrollment and runtime (must match,
+    # or embeddings won't be comparable). "retinaface" aligns faces far better
+    # than "yunet" → tighter embeddings; slower per call, but recognition runs
+    # off the hot path (threaded + deferred). Re-enroll after changing this.
+    face_detector_backend: str = Field("retinaface", env="FACE_DETECTOR_BACKEND")
     confidence_threshold: float = Field(0.60, env="CONFIDENCE_THRESHOLD")
     person_confirm_seconds: float = Field(1.0, env="PERSON_CONFIRM_SECONDS")
     alert_cooldown_seconds: int = Field(60, env="ALERT_COOLDOWN_SECONDS")

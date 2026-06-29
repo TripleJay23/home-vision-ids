@@ -211,7 +211,9 @@ class VisionPipeline:
             (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
         )
 
-        ok, buf = cv2.imencode(".jpg", frame)
+        ok, buf = cv2.imencode(
+            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, settings.stream_jpeg_quality]
+        )
         if ok:
             with self._frame_lock:
                 self._latest_jpeg = buf.tobytes()
