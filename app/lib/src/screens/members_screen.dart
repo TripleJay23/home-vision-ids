@@ -47,7 +47,10 @@ class MembersScreen extends ConsumerWidget {
               detail: 'Tap Enroll to add a household member from the camera.',
             );
           }
-          final list = RefreshIndicator(
+          // Members are the registered roster — durable registry data, not
+          // cached stream shots — so they always render the same whether served
+          // live or from the offline cache. No staleness banner.
+          return RefreshIndicator(
             onRefresh: () async => ref.invalidate(membersProvider),
             child: ListView.separated(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 88), // room for the FAB
@@ -86,14 +89,6 @@ class MembersScreen extends ConsumerWidget {
               },
             ),
           );
-          // Offline: same look as live (members rarely change), just the
-          // last-known roster with a thin "offline" hint above it.
-          if (res.fromCache) {
-            return Column(
-              children: [const OfflineBanner(), Expanded(child: list)],
-            );
-          }
-          return list;
         },
       ),
     );
@@ -117,6 +112,9 @@ class MembersScreen extends ConsumerWidget {
     if (!ok) return false;
     try {
       await ref.read(apiClientProvider).deleteMember(name);
+      // Evict from the offline cache too, so a deleted member can't reappear in
+      // the roster if the backend drops before the next fetch.
+      await removeMemberFromCache(ref, name);
       ref.invalidate(membersProvider);
       return true;
     } catch (e) {

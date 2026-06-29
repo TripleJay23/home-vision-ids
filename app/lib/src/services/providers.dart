@@ -100,3 +100,17 @@ final membersProvider = FutureProvider<Offlineable<List<Member>>>((ref) {
     fromJson: Member.fromJson,
   );
 });
+
+/// Drop a member from the on-device roster cache after a successful delete, so
+/// an entirely-deleted member can't reappear in the offline list before the
+/// next fetch. No-op if there is no cache yet.
+Future<void> removeMemberFromCache(WidgetRef ref, String name) async {
+  final prefs = ref.read(sharedPreferencesProvider);
+  final cached = prefs.getString(_kCacheMembers);
+  if (cached == null) return;
+  final list = (jsonDecode(cached) as List)
+      .cast<Map<String, dynamic>>()
+      .where((m) => m['name'] != name)
+      .toList();
+  await prefs.setString(_kCacheMembers, jsonEncode(list));
+}
