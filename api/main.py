@@ -53,11 +53,16 @@ app.add_middleware(
 
 
 # ── Routes ───────────────────────────────────────────────────
+# Every data route requires a valid X-API-Key header (see api/security.py).
+from fastapi import Depends
+from api.security import require_api_key
 from api.routes import stream, alerts, members, devices
-app.include_router(stream.router, prefix="/stream", tags=["Stream"])
-app.include_router(alerts.router, prefix="/alerts", tags=["Alerts"])
-app.include_router(members.router, prefix="/members", tags=["Members"])
-app.include_router(devices.router, prefix="/devices", tags=["Devices"])
+
+_auth = [Depends(require_api_key)]
+app.include_router(stream.router, prefix="/stream", tags=["Stream"], dependencies=_auth)
+app.include_router(alerts.router, prefix="/alerts", tags=["Alerts"], dependencies=_auth)
+app.include_router(members.router, prefix="/members", tags=["Members"], dependencies=_auth)
+app.include_router(devices.router, prefix="/devices", tags=["Devices"], dependencies=_auth)
 
 
 @app.get("/", tags=["System"])
