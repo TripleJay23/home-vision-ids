@@ -59,7 +59,7 @@ async def list_alerts(limit: int = Query(20, ge=1, le=100)):
 @router.get("/{alert_id}/snapshot", summary="Fetch an alert's snapshot image")
 async def alert_snapshot(alert_id: str):
     alerter = _require_alerter()
-    match = next((a for a in alerter.recent_alerts(limit=100) if a.alert_id == alert_id), None)
+    match = alerter.get_alert(alert_id)
     if match is None or not match.snapshot_path:
         raise HTTPException(status_code=404, detail="Alert or snapshot not found")
     path = Path(match.snapshot_path)

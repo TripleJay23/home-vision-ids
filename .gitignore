@@ -23,6 +23,7 @@ data/faces/*
 tests/test_images/*
 data/embeddings/*
 data/alerts/*
+data/alerts.db
 data/fcm_tokens.json
 !data/faces/.gitkeep
 !data/embeddings/.gitkeep

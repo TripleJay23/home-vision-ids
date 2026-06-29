@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     models_path: Path = Field(Path("engine/models"), env="MODELS_PATH")
     logs_path: Path = Field(Path("data/logs"), env="LOGS_PATH")
     alerts_path: Path = Field(Path("data/alerts"), env="ALERTS_PATH")
+    # SQLite database of alert records, so alert history survives a restart.
+    alerts_db_path: Path = Field(Path("data/alerts.db"), env="ALERTS_DB_PATH")
 
     # Firebase
     firebase_credentials_path: Path = Field(..., env="FIREBASE_CREDENTIALS_PATH")

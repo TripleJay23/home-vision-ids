@@ -127,6 +127,7 @@ class AlertService:
         store: SnapshotStore,
         notifier: Notifier,
         cooldown_seconds: int | None = None,
+        alert_repo=None,
     ):
         self.store = store
         self.notifier = notifier
@@ -135,6 +136,9 @@ class AlertService:
             else settings.alert_cooldown_seconds
         )
         self._last_alert_at: dict[int, float] = {}  # track_id -> monotonic time
+        # Persistent record store (SQLite) when provided — alert history then
+        # survives restarts. Falls back to an in-memory ring buffer otherwise.
+        self._repo = alert_repo
         self._recent: deque[Alert] = deque(maxlen=100)  # newest-last ring buffer for the API
 
     def should_alert(self, track_id: int) -> bool:
@@ -178,14 +182,25 @@ class AlertService:
             return None
 
         self._last_alert_at[track_id] = time.monotonic()
-        self._recent.append(alert)
+        if self._repo is not None:
+            self._repo.add(alert)
+        else:
+            self._recent.append(alert)
         logger.warning(f"ALERT raised: unknown person (track #{track_id}) → {alert.alert_id}")
         return alert
 
     def recent_alerts(self, limit: int = 20) -> list[Alert]:
         """Return the most recent alerts, newest first (capped at `limit`)."""
+        if self._repo is not None:
+            return self._repo.recent(limit)
         items = list(self._recent)[-limit:]
         return list(reversed(items))
+
+    def get_alert(self, alert_id: str) -> Alert | None:
+        """Look up a single alert by id (persisted store or in-memory buffer)."""
+        if self._repo is not None:
+            return self._repo.get(alert_id)
+        return next((a for a in self._recent if a.alert_id == alert_id), None)
 
     def forget(self, track_id: int) -> None:
         """Drop cooldown state for an evicted track to avoid unbounded growth."""
@@ -224,6 +239,11 @@ def build_alert_service() -> AlertService:
       credentials, no bucket → LOCAL snapshots + FCM push   (Storage skipped)
       no credentials         → local snapshots + stub notifier (fully offline)
     """
+    # Alert records persist to SQLite regardless of the snapshot/notifier
+    # backend, so alert history survives a restart.
+    from engine.core.alert_store import AlertStore
+    repo = AlertStore(settings.alerts_db_path)
+
     if _credentials_present():
         try:
             # Imported lazily so the offline path never touches firebase_admin.
@@ -237,13 +257,13 @@ def build_alert_service() -> AlertService:
             notifier = FcmNotifier()
             if _storage_configured():
                 logger.success("AlertService: Firebase Storage snapshots + FCM push.")
-                return AlertService(store=FirebaseSnapshotStore(), notifier=notifier)
+                return AlertService(store=FirebaseSnapshotStore(), notifier=notifier, alert_repo=repo)
             logger.success("AlertService: local snapshots + Firebase FCM push (Storage skipped).")
-            return AlertService(store=LocalSnapshotStore(), notifier=notifier)
+            return AlertService(store=LocalSnapshotStore(), notifier=notifier, alert_repo=repo)
         except Exception as e:
             logger.error(
                 f"Firebase init failed ({e}); falling back to local store + stub notifier."
             )
 
     logger.info("AlertService using local snapshot store + stub notifier (no Firebase).")
-    return AlertService(store=LocalSnapshotStore(), notifier=StubNotifier())
+    return AlertService(store=LocalSnapshotStore(), notifier=StubNotifier(), alert_repo=repo)
