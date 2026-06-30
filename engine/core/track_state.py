@@ -45,10 +45,21 @@ REVERIFY_SECONDS = 10.0
 # Grace period before a track is dropped after its detection disappears. The
 # detector + ByteTrack flicker frame-to-frame (a person isn't detected every
 # single frame), and evicting on the first miss wiped the track's accumulated
-# votes AND reset its confirmation window — so members never reached the 4/5
+# votes AND reset its confirmation window — so members never reached the
 # vote majority and fell through to "stranger". Keeping the track (and its
 # votes) alive for this long lets recognition actually accumulate across gaps.
-EVICT_GRACE_SECONDS = 1.5
+#
+# It MUST exceed the worst single-frame stall, not just detector flicker. On
+# CPU a RetinaFace recognition call (1.5-3.3s, measured live) saturates the
+# cores and starves the main loop, so the interval between two processed frames
+# can momentarily reach ~3s. With a 1.5s grace the track was being evicted
+# *between frames* purely because the loop was busy recognising — churning
+# #id evict/register, resetting votes every cycle, so a decision never
+# committed and recognition fired back-to-back forever (perpetual FPS
+# collapse). Sizing the grace above the worst recognition frame keeps the track
+# and its votes alive across that stall; once a verdict commits, re-verification
+# drops to REVERIFY_SECONDS and the CPU (and preview FPS) recovers.
+EVICT_GRACE_SECONDS = 4.0
 
 # ── Temporal-consistency voting (Phase 6 mitigation) ───────────────────────
 # A SINGLE recognition frame is unreliable: at consumer-camera quality a

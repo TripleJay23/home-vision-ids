@@ -18,12 +18,15 @@ const List<(String, String)> _poses = [
   ('Any angle you like', 'free'),
 ];
 
-/// Shots taken per pose on a single "Capture" tap (a quick burst). 8 poses ×
-/// this = the ~32 reference photos the recogniser wants for robustness, without
-/// 32 taps.
-const int _shotsPerPose = 4;
+/// Shots taken per pose on a single "Capture" tap (a quick burst). The burst
+/// frames are taken ~300ms apart while the user holds the pose, so they're
+/// near-duplicates — 2 is enough for robustness against a single bad frame
+/// without paying RetinaFace's per-photo cost on redundant copies. Accuracy
+/// comes from the 8 distinct poses (angles + distances), not burst depth.
+/// 8 poses × 2 = ~16 reference photos → ~halves the enrollment build time.
+const int _shotsPerPose = 2;
 
-enum _Phase { naming, capturing, enrolling, done }
+enum _Phase { naming, capturing, enrolling }
 
 /// In-app member enrollment using the device camera: enter a name, walk through
 /// the guided poses tapping Capture, then the backend builds the embeddings.
@@ -46,7 +49,6 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
   String? _error;
   String? _status; // transient "Capturing 2/4…" during a burst
   String _name = '';
-  int _enrolledCount = 0;
 
   @override
   void dispose() {
@@ -145,18 +147,26 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
       _phase = _Phase.enrolling;
       _busy = true;
     });
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
     try {
-      final count = await ref.read(apiClientProvider).enrollMember(_name);
+      // Returns as soon as the build is queued — the server builds embeddings in
+      // the background. We pop straight back to the Members list, where the new
+      // member shows "Enrolling…" and flips to "Enrolled" when the build lands.
+      await ref.read(apiClientProvider).enrollMember(_name);
       await _controller?.dispose();
       _controller = null;
       ref.invalidate(membersProvider);
-      setState(() {
-        _enrolledCount = count;
-        _phase = _Phase.done;
-        _busy = false;
-      });
+      if (!mounted) return;
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Enrolling "$_name"… they\'ll appear as “Enrolling”, then “Enrolled”.'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     } catch (e) {
-      // Enrollment failed (e.g. no face found) — let them re-capture.
+      // Couldn't even queue it (e.g. no photos / backend unreachable) — let them retry.
       setState(() {
         _error = '$e';
         _phase = _Phase.capturing;
@@ -174,7 +184,6 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
         _Phase.naming => _buildNaming(),
         _Phase.capturing => _buildCapturing(),
         _Phase.enrolling => _buildEnrolling(),
-        _Phase.done => _buildDone(),
       },
     );
   }
@@ -299,31 +308,11 @@ class _EnrollMemberScreenState extends ConsumerState<EnrollMemberScreen> {
         children: [
           const CircularProgressIndicator(),
           const SizedBox(height: 16),
-          Text('Building face profile for "$_name"…', style: Theme.of(context).textTheme.titleMedium),
+          Text('Sending "$_name" for processing…', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 6),
-          Text('Running detection + recognition on your photos.',
+          Text('The face profile builds in the background — you can leave this screen.',
               style: Theme.of(context).textTheme.bodySmall),
         ],
-      ),
-    );
-  }
-
-  Widget _buildDone() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.check_circle, size: 64, color: Colors.green.shade600),
-            const SizedBox(height: 16),
-            Text('"$_name" enrolled', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 6),
-            Text('$_enrolledCount face samples added.', style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 24),
-            FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done')),
-          ],
-        ),
       ),
     );
   }

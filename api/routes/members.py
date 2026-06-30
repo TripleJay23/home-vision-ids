@@ -22,7 +22,6 @@ from pydantic import BaseModel
 
 from api.schemas.alert import MemberOut, MemberListOut
 from api.services.pipeline import get_pipeline
-from engine.core.enrollment import enroll_person
 from engine.core.face_db import FaceDatabase, PROJECT_ROOT
 
 router = APIRouter()
@@ -39,8 +38,8 @@ class CaptureOut(BaseModel):
 
 class EnrollOut(BaseModel):
     name: str
-    embedding_count: int
-    enrolled: bool
+    status: str               # enrolling | enrolled | failed
+    embedding_count: int = 0
 
 
 class DeleteOut(BaseModel):
@@ -68,11 +67,33 @@ def _load_db() -> FaceDatabase:
 @router.get("", response_model=MemberListOut, summary="List enrolled members")
 async def list_members():
     db = _load_db()
+    pipeline = get_pipeline()
+    statuses = pipeline.enrollments_snapshot() if pipeline is not None else {}
+
     members = []
+    seen = set()
     for name in db.known_names():
         rows = [m for m in db.metadata if m["name"] == name]
         latest = max((m.get("enrolled_at") for m in rows if m.get("enrolled_at")), default=None)
-        members.append(MemberOut(name=name, embedding_count=len(rows), enrolled_at=latest))
+        st = statuses.get(name, {})
+        # A member already in the DB is "enrolled" unless a build is re-running.
+        status = st.get("status") if st.get("status") in ("enrolling", "failed") else "enrolled"
+        members.append(MemberOut(
+            name=name, embedding_count=len(rows), enrolled_at=latest,
+            status=status, error=st.get("error"),
+        ))
+        seen.add(name)
+
+    # Members whose first-ever build is still running (or failed) aren't in the
+    # DB yet — surface them so the app can show "enrolling…" / "failed".
+    for name, st in statuses.items():
+        if name in seen or st.get("status") not in ("enrolling", "failed"):
+            continue
+        members.append(MemberOut(
+            name=name, embedding_count=0, enrolled_at=st.get("enrolled_at"),
+            status=st["status"], error=st.get("error"),
+        ))
+
     return MemberListOut(count=len(members), members=members)
 
 
@@ -91,24 +112,22 @@ async def upload_photo(name: str, file: UploadFile = File(...), pose: str = Quer
 
 
 @router.post("/{name}/enroll", response_model=EnrollOut, summary="Enroll a member from uploaded photos")
-def enroll_member(name: str):
-    # Sync def → FastAPI runs it in a threadpool, so the heavy YOLO/ArcFace work
-    # doesn't block the async event loop.
+async def enroll_member(name: str):
+    # Returns immediately: the heavy YOLO/ArcFace build runs on a background
+    # worker (live loop paused so it isn't CPU-starved). The app polls /members
+    # for the "enrolling" → "enrolled" transition instead of blocking here.
     name = _safe_name(name)
     pipeline = get_pipeline()
     if pipeline is None:
         raise HTTPException(status_code=503, detail="Vision pipeline not available.")
 
-    db = FaceDatabase()
-    added = enroll_person(name, FACES_DIR / name, db, pipeline.detector)
-    if added == 0:
-        raise HTTPException(
-            status_code=422,
-            detail="No usable face found in the uploaded photos — re-capture with the face clearer.",
-        )
-    db.save()
-    pipeline.recognizer.reload()  # running pipeline now recognises this member
-    return EnrollOut(name=name, embedding_count=db.count_for(name), enrolled=True)
+    person_dir = FACES_DIR / name
+    photos = [f for f in person_dir.iterdir() if f.suffix.lower() in _IMAGE_EXTS] if person_dir.exists() else []
+    if not photos:
+        raise HTTPException(status_code=400, detail="No photos uploaded for this member yet.")
+
+    status = pipeline.enroll_async(name, person_dir)
+    return EnrollOut(name=name, status=status["status"], embedding_count=status.get("count", 0))
 
 
 @router.delete("/{name}", response_model=DeleteOut, summary="Remove a member (embeddings + photos)")
@@ -124,5 +143,6 @@ def delete_member(name: str):
 
     pipeline = get_pipeline()
     if pipeline is not None:
+        pipeline.forget_enrollment(name)
         pipeline.recognizer.reload()
     return DeleteOut(name=name, removed=removed)

@@ -26,6 +26,8 @@ class MemberOut(BaseModel):
     name: str
     embedding_count: int
     enrolled_at: str | None = None  # most recent enrollment timestamp
+    status: str = "enrolled"        # enrolled | enrolling | failed
+    error: str | None = None        # failure detail when status == "failed"
 
 
 class MemberListOut(BaseModel):

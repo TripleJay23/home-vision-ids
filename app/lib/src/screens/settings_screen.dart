@@ -34,27 +34,57 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     super.dispose();
   }
 
-  Future<void> _save() async {
+  /// Persist URL + key without any UI feedback. Shared by Save and Test so both
+  /// act on exactly what's in the fields right now.
+  Future<void> _persist() async {
     final url = _controller.text.trim();
-    if (url.isEmpty) return;
-    await ref.read(backendUrlProvider.notifier).setUrl(url);
+    if (url.isNotEmpty) {
+      await ref.read(backendUrlProvider.notifier).setUrl(url);
+    }
     await ref.read(apiKeyProvider.notifier).setKey(_keyController.text);
     if (!mounted) return;
     _controller.text = ref.read(backendUrlProvider);
     _keyController.text = ref.read(apiKeyProvider);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
   }
 
+  void _snack(String message, {Color? background}) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: background,
+        duration: const Duration(seconds: 4),
+      ));
+  }
+
+  Future<void> _save() async {
+    if (_controller.text.trim().isEmpty) {
+      _snack('Enter a backend URL first.', background: Theme.of(context).colorScheme.error);
+      return;
+    }
+    await _persist();
+    if (!mounted) return;
+    _snack('Settings saved.');
+  }
+
+  /// Actually exercise the configured URL + key against an authenticated
+  /// endpoint and report the real result — reachable + key accepted, wrong key,
+  /// or unreachable — instead of a blanket "connected".
   Future<void> _testConnection() async {
-    await _save(); // test what's actually configured
+    if (_controller.text.trim().isEmpty) {
+      _snack('Enter a backend URL first.', background: Theme.of(context).colorScheme.error);
+      return;
+    }
+    await _persist(); // test exactly what's configured
+    if (!mounted) return;
     setState(() => _testing = true);
-    final ok = await ref.read(apiClientProvider).ping();
+    final result = await ref.read(apiClientProvider).verify();
     if (!mounted) return;
     setState(() => _testing = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok ? 'Connected to backend ✓' : 'Could not reach backend ✗'),
-      backgroundColor: ok ? Colors.green.shade700 : Theme.of(context).colorScheme.error,
-    ));
+    _snack(
+      result.message,
+      background: result.ok ? Colors.green.shade700 : Theme.of(context).colorScheme.error,
+    );
   }
 
   @override

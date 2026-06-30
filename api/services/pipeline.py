@@ -19,6 +19,8 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -60,12 +62,25 @@ class VisionPipeline:
         self._frame_lock = threading.Lock()
         self._latest_jpeg: bytes | None = None
         self._signal_lost_jpeg_cache: bytes | None = None  # built once, on demand
+        self._paused_jpeg_cache: bytes | None = None        # built once, on demand
 
         self._running = False
         self._thread: threading.Thread | None = None
         self.fps = 0.0
         self._fps_log_count = 0      # periodic perf-log throttle
         self._recog_ms = 0.0         # last recognition inference time (ms)
+
+        # Live loop runs while this is set; cleared to PAUSE it (during a heavy
+        # enrollment build, so YOLO doesn't starve the CPU the build needs).
+        self._active = threading.Event()
+        self._active.set()
+
+        # Background enrollment: builds run off the request thread on a single
+        # worker (sequential, CPU-bound), with per-name status the API exposes so
+        # the app can show "enrolling…" → "enrolled" without blocking on the call.
+        self._enroll_executor = ThreadPoolExecutor(max_workers=1)
+        self._enroll_lock = threading.Lock()
+        self._enrollments: dict[str, dict] = {}  # name -> {status, count, error, enrolled_at}
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -82,6 +97,7 @@ class VisionPipeline:
         if self._thread:
             self._thread.join(timeout=3)
         self._executor.shutdown(wait=False)
+        self._enroll_executor.shutdown(wait=False)
         self.stream.stop()
         logger.info("Vision pipeline stopped.")
 
@@ -90,6 +106,85 @@ class VisionPipeline:
         with self._frame_lock:
             return self._latest_jpeg
 
+    # ── Pause / resume (free the CPU for enrollment) ───────────────────────────
+
+    def pause(self) -> None:
+        """Pause the live detection/recognition loop (it idles, publishing a
+        placeholder). Used around a heavy enrollment build."""
+        self._active.clear()
+
+    def resume(self) -> None:
+        """Resume the live loop after a pause."""
+        self._active.set()
+
+    # ── Background enrollment ──────────────────────────────────────────────────
+
+    def enroll_async(self, name: str, faces_dir: Path) -> dict:
+        """
+        Kick off building `name`'s embeddings on the background worker and return
+        immediately. The live loop is paused for the duration so the build isn't
+        starved by YOLO. Status is tracked per-name (see enrollment_status) so the
+        app can poll for completion. Returns the initial status dict.
+        """
+        with self._enroll_lock:
+            self._enrollments[name] = {
+                "status": "enrolling", "count": 0, "error": None, "enrolled_at": None,
+            }
+        self.pause()
+        self._enroll_executor.submit(self._run_enrollment, name, faces_dir)
+        logger.info(f"Enrollment queued for '{name}' (live loop paused).")
+        return self.enrollment_status(name)
+
+    def _run_enrollment(self, name: str, faces_dir: Path) -> None:
+        """Worker: build embeddings, persist, reload the recogniser, record status."""
+        # Imported here to keep the pipeline's import graph light.
+        from engine.core.enrollment import enroll_person
+        from engine.core.face_db import FaceDatabase
+
+        try:
+            db = FaceDatabase()
+            added = enroll_person(name, faces_dir, db, self.detector)
+            if added == 0:
+                self._set_enrollment(name, "failed", 0,
+                                     "No usable face found — re-capture with the face clearer.")
+                return
+            db.save()
+            self.recognizer.reload()  # running pipeline now recognises this member
+            self._set_enrollment(name, "enrolled", db.count_for(name), None,
+                                 enrolled_at=datetime.now().isoformat(timespec="seconds"))
+            logger.success(f"Enrollment complete for '{name}': {db.count_for(name)} embeddings.")
+        except Exception as e:
+            logger.error(f"Enrollment failed for '{name}': {e}")
+            self._set_enrollment(name, "failed", 0, str(e))
+        finally:
+            # Resume the live loop once no other build is still running.
+            with self._enroll_lock:
+                still_building = any(v["status"] == "enrolling" for v in self._enrollments.values())
+            if not still_building:
+                self.resume()
+                logger.info("Enrollment(s) done — live loop resumed.")
+
+    def _set_enrollment(self, name: str, status: str, count: int,
+                        error: str | None, enrolled_at: str | None = None) -> None:
+        with self._enroll_lock:
+            self._enrollments[name] = {
+                "status": status, "count": count, "error": error, "enrolled_at": enrolled_at,
+            }
+
+    def enrollment_status(self, name: str) -> dict | None:
+        with self._enroll_lock:
+            entry = self._enrollments.get(name)
+            return dict(entry) if entry else None
+
+    def enrollments_snapshot(self) -> dict[str, dict]:
+        with self._enroll_lock:
+            return {k: dict(v) for k, v in self._enrollments.items()}
+
+    def forget_enrollment(self, name: str) -> None:
+        """Drop a member's enrollment-status entry (e.g. after deletion)."""
+        with self._enroll_lock:
+            self._enrollments.pop(name, None)
+
     # ── Main loop ──────────────────────────────────────────────────────────────
 
     def _loop(self) -> None:
@@ -97,6 +192,14 @@ class VisionPipeline:
         fps_timer = time.time()
 
         while self._running:
+            # Paused during an enrollment build — don't run detection/recognition
+            # so the CPU-bound embedding build runs fast. Surface a placeholder so
+            # the live view explains the pause instead of freezing.
+            if not self._active.is_set():
+                self._publish_paused()
+                time.sleep(0.15)
+                continue
+
             frame = self.stream.read()
             if frame is None:
                 # Camera down or no frame yet — surface a "signal lost" frame so
@@ -226,18 +329,33 @@ class VisionPipeline:
     def _signal_lost_frame(self) -> bytes:
         """A black frame with a 'CAMERA SIGNAL LOST' banner. Built once, cached."""
         if self._signal_lost_jpeg_cache is None:
-            w, h = settings.stream_width, settings.stream_height
-            frame = np.zeros((h, w, 3), dtype=np.uint8)
-            text = "CAMERA SIGNAL LOST"
-            font, fscale, thick = cv2.FONT_HERSHEY_SIMPLEX, 1.4, 3
-            (tw, th), _ = cv2.getTextSize(text, font, fscale, thick)
-            cv2.putText(
-                frame, text, ((w - tw) // 2, (h + th) // 2),
-                font, fscale, (60, 60, 220), thick, cv2.LINE_AA,
-            )
-            ok, buf = cv2.imencode(".jpg", frame)
-            self._signal_lost_jpeg_cache = buf.tobytes() if ok else b""
+            self._signal_lost_jpeg_cache = self._banner_frame("CAMERA SIGNAL LOST", (60, 60, 220))
         return self._signal_lost_jpeg_cache
+
+    def _publish_paused(self) -> None:
+        """Publish an 'enrollment in progress' placeholder as the latest frame."""
+        with self._frame_lock:
+            self._latest_jpeg = self._paused_frame()
+
+    def _paused_frame(self) -> bytes:
+        """A frame explaining the live loop is paused for enrollment. Cached."""
+        if self._paused_jpeg_cache is None:
+            self._paused_jpeg_cache = self._banner_frame("ENROLLING — LIVE PAUSED", (200, 160, 0))
+        return self._paused_jpeg_cache
+
+    @staticmethod
+    def _banner_frame(text: str, color: tuple[int, int, int]) -> bytes:
+        """A black frame with a single centred banner line, encoded to JPEG."""
+        w, h = settings.stream_width, settings.stream_height
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        font, fscale, thick = cv2.FONT_HERSHEY_SIMPLEX, 1.4, 3
+        (tw, th), _ = cv2.getTextSize(text, font, fscale, thick)
+        cv2.putText(
+            frame, text, ((w - tw) // 2, (h + th) // 2),
+            font, fscale, color, thick, cv2.LINE_AA,
+        )
+        ok, buf = cv2.imencode(".jpg", frame)
+        return buf.tobytes() if ok else b""
 
     @staticmethod
     def _draw(frame: np.ndarray, det: dict, label: str) -> None:

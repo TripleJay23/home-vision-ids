@@ -37,7 +37,7 @@ class AlertsScreen extends ConsumerWidget {
       ),
       body: alertsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(message: '$e', onRetry: () => ref.invalidate(alertsProvider)),
+        error: (e, _) => errorView(e, () => ref.invalidate(alertsProvider)),
         data: (res) {
           final alerts = res.data;
           if (alerts.isEmpty) {

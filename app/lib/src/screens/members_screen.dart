@@ -1,18 +1,57 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/member.dart';
 import '../services/providers.dart';
 import '../utils/format.dart';
 import 'enroll_member_screen.dart';
 import 'widgets/async_views.dart';
 
 /// Enrolled household members from /members, with in-app enroll + delete.
-class MembersScreen extends ConsumerWidget {
+///
+/// Enrollment builds run in the background on the server, so a freshly added
+/// member first appears as "Enrolling…" and flips to "Enrolled" once its
+/// embeddings are built. While any member is enrolling, this screen polls
+/// /members so that transition shows up without a manual refresh.
+class MembersScreen extends ConsumerStatefulWidget {
   const MembersScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MembersScreen> createState() => _MembersScreenState();
+}
+
+class _MembersScreenState extends ConsumerState<MembersScreen> {
+  Timer? _poll;
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  /// Run a 3s poll only while at least one member is mid-build.
+  void _syncPolling({required bool anyEnrolling}) {
+    if (anyEnrolling) {
+      _poll ??= Timer.periodic(
+        const Duration(seconds: 3),
+        (_) => ref.invalidate(membersProvider),
+      );
+    } else {
+      _poll?.cancel();
+      _poll = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final membersAsync = ref.watch(membersProvider);
+    final anyEnrolling = membersAsync.asData?.value.data.any((m) => m.isEnrolling) ?? false;
+    // Start/stop the poll after this frame (can't touch a Timer mid-build).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncPolling(anyEnrolling: anyEnrolling);
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -37,7 +76,7 @@ class MembersScreen extends ConsumerWidget {
       ),
       body: membersAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorRetry(message: '$e', onRetry: () => ref.invalidate(membersProvider)),
+        error: (e, _) => errorView(e, () => ref.invalidate(membersProvider)),
         data: (res) {
           final members = res.data;
           if (members.isEmpty) {
@@ -78,12 +117,8 @@ class MembersScreen extends ConsumerWidget {
                       child: Text(m.name.isNotEmpty ? m.name[0].toUpperCase() : '?'),
                     ),
                     title: Text(display, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: m.enrolledAt != null ? Text('enrolled ${timeAgo(m.enrolledAt!)}') : null,
-                    trailing: Chip(
-                      avatar: const Icon(Icons.face_outlined, size: 18),
-                      label: Text('${m.embeddingCount}'),
-                      visualDensity: VisualDensity.compact,
-                    ),
+                    subtitle: _subtitle(context, m),
+                    trailing: _trailing(context, m),
                   ),
                 );
               },
@@ -91,6 +126,37 @@ class MembersScreen extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+
+  Widget? _subtitle(BuildContext context, Member m) {
+    if (m.isEnrolling) return const Text('building face profile…');
+    if (m.isFailed) {
+      return Text(m.error ?? 'enrollment failed',
+          style: TextStyle(color: Theme.of(context).colorScheme.error));
+    }
+    return m.enrolledAt != null ? Text('enrolled ${timeAgo(m.enrolledAt!)}') : null;
+  }
+
+  Widget _trailing(BuildContext context, Member m) {
+    if (m.isEnrolling) {
+      return const Chip(
+        avatar: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+        label: Text('Enrolling…'),
+        visualDensity: VisualDensity.compact,
+      );
+    }
+    if (m.isFailed) {
+      return Chip(
+        avatar: Icon(Icons.error_outline, size: 18, color: Theme.of(context).colorScheme.error),
+        label: const Text('Failed'),
+        visualDensity: VisualDensity.compact,
+      );
+    }
+    return Chip(
+      avatar: const Icon(Icons.face_outlined, size: 18),
+      label: Text('${m.embeddingCount}'),
+      visualDensity: VisualDensity.compact,
     );
   }
 

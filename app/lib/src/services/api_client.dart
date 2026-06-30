@@ -49,13 +49,42 @@ class ApiClient {
     return res.bodyBytes;
   }
 
-  /// Quick reachability check against /health.
+  /// Quick reachability check against /health (unauthenticated — only tells you
+  /// the server is up, NOT whether the API key is valid). Use [verify] for the
+  /// Settings "Test" button.
   Future<bool> ping() async {
     try {
       final res = await http.get(Uri.parse('$baseUrl/health'), headers: headers).timeout(_timeout);
       return res.statusCode == 200;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Verify the backend is reachable AND the configured API key is accepted, by
+  /// calling an AUTHENTICATED endpoint (/members). /health would pass even with
+  /// a wrong key, so it must not be used here. Returns a clear, actionable
+  /// result for each distinct outcome.
+  Future<ConnectionCheck> verify() async {
+    final http.Response res;
+    try {
+      res = await http.get(Uri.parse('$baseUrl/members'), headers: headers).timeout(_timeout);
+    } on TimeoutException {
+      return const ConnectionCheck(false, 'Timed out reaching the backend. Check the URL and that the server is running.');
+    } on SocketException {
+      return ConnectionCheck(false, "Can't reach the backend at $baseUrl. Check the URL and that the server is running.");
+    } on http.ClientException {
+      return ConnectionCheck(false, "Can't reach the backend at $baseUrl. Check the URL and that the server is running.");
+    }
+    switch (res.statusCode) {
+      case 200:
+        return const ConnectionCheck(true, 'Connected — backend reachable and API key accepted.');
+      case 401:
+        return const ConnectionCheck(false, 'API key rejected by the backend (401). Check it matches API_SECRET_KEY.');
+      case 503:
+        return const ConnectionCheck(false, 'Backend reachable, but the vision pipeline is offline (503).');
+      default:
+        return ConnectionCheck(false, 'Unexpected backend response (HTTP ${res.statusCode}).');
     }
   }
 
@@ -139,16 +168,18 @@ class ApiClient {
     return (jsonDecode(res.body) as Map<String, dynamic>)['captured'] as int;
   }
 
-  /// Build embeddings for [name] from the uploaded photos (heavy; ~tens of sec).
-  /// Returns the resulting embedding count.
-  Future<int> enrollMember(String name) async {
+  /// Kick off building [name]'s embeddings. Returns immediately — the heavy
+  /// build runs in the background on the server; the returned status is
+  /// "enrolling" and the Members screen polls /members until it becomes
+  /// "enrolled". Returns the initial status string.
+  Future<String> enrollMember(String name) async {
     final res = await http
         .post(Uri.parse('$baseUrl/members/$name/enroll'), headers: headers)
-        .timeout(const Duration(seconds: 90));
+        .timeout(_timeout);
     if (res.statusCode != 200) {
       throw ApiException(_detailOf(res) ?? 'Enrollment failed (HTTP ${res.statusCode}).');
     }
-    return (jsonDecode(res.body) as Map<String, dynamic>)['embedding_count'] as int;
+    return (jsonDecode(res.body) as Map<String, dynamic>)['status'] as String;
   }
 
   /// Remove a member (embeddings + photos).
@@ -178,6 +209,14 @@ class ApiClient {
     }
     return 'Failed to load $what (HTTP $code).';
   }
+}
+
+/// Outcome of a Settings connection test: whether it worked, plus a
+/// human-readable line explaining exactly what happened.
+class ConnectionCheck {
+  final bool ok;
+  final String message;
+  const ConnectionCheck(this.ok, this.message);
 }
 
 class ApiException implements Exception {
