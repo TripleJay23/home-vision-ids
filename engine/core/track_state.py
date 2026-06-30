@@ -34,9 +34,7 @@ from collections import Counter, deque
 from dataclasses import dataclass, field
 from loguru import logger
 
-# How long a track must be continuously visible before recognition fires.
-# Prevents wasting a DeepFace call on a person who immediately walks out.
-CONFIRM_SECONDS = 0.5
+from config.settings import settings
 
 # How often to re-run recognition on an already-identified track.
 # Corrects ID swaps from ByteTrack crossing-occlusion within this window.
@@ -61,23 +59,6 @@ REVERIFY_SECONDS = 10.0
 # drops to REVERIFY_SECONDS and the CPU (and preview FPS) recovers.
 EVICT_GRACE_SECONDS = 4.0
 
-# ── Temporal-consistency voting (Phase 6 mitigation) ───────────────────────
-# A SINGLE recognition frame is unreliable: at consumer-camera quality a
-# stranger can momentarily match a known person (measured live: a stranger hit
-# distance 0.182 to 'joshua', better than real joshua's own worst frames at
-# ~0.35). But a REAL member's identity is steady frame-to-frame while a
-# stranger's oscillates. So we never commit an identity from one frame — we keep
-# a short rolling window of recent recognition "votes" and only commit
-# "recognized as X" when X wins a strong majority. If the window fills without a
-# confident known majority, the track is treated as a STRANGER (security-safe
-# default: someone we can't consistently recognise is unknown). Costs ~1-2s of
-# extra confirmation time; eliminates most single-frame false identities.
-# Smaller window = faster decisions. With RetinaFace's tighter embeddings a
-# 2-of-3 majority is enough to confirm a member, roughly halving how long it
-# takes to commit (each recognition is ~2s on CPU). Strangers still fall
-# through once the window fills without a name reaching the majority.
-VOTE_WINDOW = 3         # number of recent recognition votes considered
-VOTE_MIN_AGREE = 2      # one name must win at least this many of the window to commit
 _STRANGER = "__stranger__"    # vote token for an "unrecognized" result
 _UNCERTAIN = "__uncertain__"  # vote token for an "uncertain" (ambiguous) result
 
@@ -93,8 +74,11 @@ class TrackEntry:
     status: str = "pending"             # pending | recognized | unrecognized
     distance: float | None = None       # closest DB distance at last decision (for alert context)
     recognition_in_flight: bool = False # True = a recognition thread is running for this track
-    votes: deque = field(default_factory=lambda: deque(maxlen=VOTE_WINDOW))  # recent vote tokens
+    votes: deque = field(default_factory=deque)  # recent vote tokens (sized in __post_init__)
     confirmed: bool = False             # True once the window has committed a recognized/stranger verdict
+
+    def __post_init__(self):
+        self.votes = deque(maxlen=settings.vote_window)
 
 
 class TrackStateManager:
@@ -146,7 +130,7 @@ class TrackStateManager:
         now = time.time()
 
         # Deferred window: must have been in frame long enough
-        if (now - entry.first_seen) < CONFIRM_SECONDS:
+        if (now - entry.first_seen) < settings.person_confirm_seconds:
             return False
 
         # Don't stack calls — one in-flight at a time per track
@@ -233,8 +217,8 @@ class TrackStateManager:
         else:  # "unrecognized"
             if entry.status != "unrecognized":
                 logger.info(
-                    f"Track #{track_id} → stranger (no name reached {VOTE_MIN_AGREE}/"
-                    f"{VOTE_WINDOW} in window {list(entry.votes)})."
+                    f"Track #{track_id} → stranger (no name reached {settings.vote_min_agree}/"
+                    f"{settings.vote_window} in window {list(entry.votes)})."
                 )
             entry.name = None
             entry.status = "unrecognized"
@@ -243,7 +227,7 @@ class TrackStateManager:
     def _tally(votes: "deque") -> tuple[str, str | None]:
         """
         Reduce the recent vote window to a verdict:
-            ("recognized", name)   — `name` won >= VOTE_MIN_AGREE of the window
+            ("recognized", name)   — `name` won >= settings.vote_min_agree of the window
             ("unrecognized", None) — window full, no name reached the majority
             ("pending", None)      — keep gathering votes
 
@@ -255,9 +239,9 @@ class TrackStateManager:
         names = Counter(v for v in window if v not in (_STRANGER, _UNCERTAIN))
         if names:
             name, count = names.most_common(1)[0]
-            if count >= VOTE_MIN_AGREE:
+            if count >= settings.vote_min_agree:
                 return ("recognized", name)
-        if len(window) >= VOTE_WINDOW:
+        if len(window) >= settings.vote_window:
             return ("unrecognized", None)
         return ("pending", None)
 
@@ -274,7 +258,7 @@ class TrackStateManager:
 
         if entry.status == "pending" or entry.last_verified == 0.0:
             elapsed = time.time() - entry.first_seen
-            remaining = max(0.0, CONFIRM_SECONDS - elapsed)
+            remaining = max(0.0, settings.person_confirm_seconds - elapsed)
             return f"identifying... ({remaining:.1f}s)" if remaining > 0 else "identifying..."
 
         if entry.status == "recognized":

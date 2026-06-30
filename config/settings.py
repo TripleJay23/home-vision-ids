@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     face_detector_backend: str = Field("retinaface", env="FACE_DETECTOR_BACKEND")
     confidence_threshold: float = Field(0.60, env="CONFIDENCE_THRESHOLD")
     person_confirm_seconds: float = Field(1.0, env="PERSON_CONFIRM_SECONDS")
+    vote_window: int = Field(3, env="VOTE_WINDOW")
+    vote_min_agree: int = Field(2, env="VOTE_MIN_AGREE")
     alert_cooldown_seconds: int = Field(60, env="ALERT_COOLDOWN_SECONDS")
     # Minimum person bbox height (px) before attempting face recognition.
     # Below this the face is too small to recognise reliably. Tune to the room:
