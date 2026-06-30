@@ -20,11 +20,10 @@ const List<(String, String)> _poses = [
 
 /// Shots taken per pose on a single "Capture" tap (a quick burst). The burst
 /// frames are taken ~300ms apart while the user holds the pose, so they're
-/// near-duplicates — 2 is enough for robustness against a single bad frame
-/// without paying RetinaFace's per-photo cost on redundant copies. Accuracy
-/// comes from the 8 distinct poses (angles + distances), not burst depth.
-/// 8 poses × 2 = ~16 reference photos → ~halves the enrollment build time.
-const int _shotsPerPose = 2;
+/// near-duplicates — 4 is used for robustness against single bad frames.
+/// Accuracy comes from the 8 distinct poses (angles + distances).
+/// 8 poses × 4 = ~32 reference photos.
+const int _shotsPerPose = 4;
 
 enum _Phase { naming, capturing, enrolling }
 
